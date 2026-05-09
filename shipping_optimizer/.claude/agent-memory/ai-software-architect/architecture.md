@@ -101,7 +101,11 @@ solution: Solution | None  # None if infeasible
 <!-- Record decisions so we don't accidentally reverse them -->
 | Decision | Rationale | Date | Made By |
 |----------|-----------|------|---------|
-| [Add as discovered or decided] | | | |
+| Dual FastAPI servers (main.py vs server.py) | Historical - need to unify | 2026-05-09 | Audit Finding |
+| WebSocket at /ws/pipeline vs /ws | Inconsistent endpoint naming | 2026-05-09 | Audit Finding |
+| MockProblem in PipelineStreamer | Quick prototyping, now blocks real integration | 2026-05-09 | Audit Finding |
+| File-based state persistence | Simple but limits scalability | 2026-05-09 | Audit Finding |
+| No authentication/authorization | Development-only assumption | 2026-05-09 | Audit Finding |
 
 ---
 

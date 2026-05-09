@@ -883,7 +883,23 @@ def test_orchestrator():
 
     print(f"\n{'=' * 70}\n")
 
+    # Save result to JSON file for dashboard (save even if tests fail)
+    output_dir = Path(__file__).parent.parent
+    output_file = output_dir / "pipeline_output.json"
+
+    try:
+        with open(output_file, 'w') as f:
+            json.dump(result, f, indent=2)
+        save_msg = f"✅ PIPELINE OUTPUT SAVED TO: {output_file}"
+    except Exception as e:
+        save_msg = f"❌ FAILED TO SAVE OUTPUT: {e}"
+
     assert _FAIL == 0, f"{_FAIL} assertion(s) failed — see output above."
+
+    print(f"\n{'='*70}")
+    print(save_msg)
+    print(f"{'='*70}")
+
     return result
 
 

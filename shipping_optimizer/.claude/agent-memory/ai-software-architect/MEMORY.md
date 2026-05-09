@@ -90,4 +90,7 @@ Always trace issues through this full chain. Never analyze a single file in isol
 
 <!-- Agent: append a one-line summary after each session -->
 <!-- Format: [YYYY-MM-DD] Brief description of what was analyzed and key finding -->
+[2026-05-09] Complete end-to-end architectural audit: Found functional AI pipeline but broken real-time dashboard integration due to WebSocket mismatches and mock data usage
+[2026-05-09] Identified critical frontend disconnect: maritime_dashboard.jsx uses hardcoded DATA, no WebSocket client implemented
+[2026-05-09] Discovered event schema inconsistency: main.py validates events via EventValidator but real_orchestrator_integration.py sends raw dicts
 

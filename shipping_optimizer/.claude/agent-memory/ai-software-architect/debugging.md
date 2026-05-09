@@ -110,5 +110,9 @@ Mark the step where the failure first occurs — that is the localization point.
 <!-- Add after resolving non-obvious bugs -->
 | Lesson | Context | Date |
 |--------|---------|------|
-| [Add as discovered] | | |
+| WebSocket endpoint mismatches break real-time features | Frontend expects `/ws/pipeline` but backend provides `/ws` | 2026-05-09 |
+| Dual server architecture creates integration confusion | main.py and server.py have different implementations | 2026-05-09 |
+| Mock data in production breaks data flow integrity | PipelineStreamer uses MockProblem instead of real loader | 2026-05-09 |
+| Event naming inconsistency prevents handler execution | `pipeline_complete` vs `pipeline_completed` | 2026-05-09 |
+| Missing file handling causes system crashes | server.py line 316 lacks try/catch for file not found | 2026-05-09 |
 

@@ -1,0 +1,292 @@
+{
+  "orchestrator": "orchestrator",
+  "status": "complete",
+  "problem_analysis": "Size: Large  \nComplexity Drivers:  \n- 435 ports create a combinatorial routing space.  \n- Lane density\u202f=\u202f10.2\u202f% (\u2248\u202f982 active lanes out of 9,622 possible), inflating MILP variable count.  \n- Demand heterogeneity: the highest\u2011volume lane (Port\u202f285\u202f\u2192\u202fPort\u202f146) carries 10,902\u202fTEU/week, \u2248\u202f126\u202f\u00d7 the average lane demand of 86.6\u202fTEU.  \n\nDemand Concentration: moderate \u2013 the top\u20115 corridors hold 3.5\u202f% of total weekly TEU, so a few high\u2011volume routes dominate capacity planning.  \n\nDecomposition Rationale: The network is split into three geographic regions of roughly 145 ports each to keep MILP sub\u2011problems tractable while preserving key inter\u2011regional traffic.",
+  "regional_results": [
+    {
+      "agent": "regional_asia",
+      "region": "Asia",
+      "status": "Optimal",
+      "services_generated": 802,
+      "services_filtered": 400,
+      "services_selected": 95,
+      "weekly_profit": 104822735.25074181,
+      "annual_profit": 5450782233.038574,
+      "operating_cost": 20610000.0,
+      "transship_cost": 6521760.002904001,
+      "port_cost": 0.0,
+      "total_cost": 27131760.002904,
+      "coverage_percent": 75.35355779518606,
+      "satisfied_demand": 81522.0000363,
+      "unserved_demand": 26664.0,
+      "total_demand": 108186,
+      "profit_margin_pct": 79.4,
+      "profit_per_service": 1103397.0,
+      "cost_per_service": 285597.0,
+      "uncovered_teu": 26663.999963700007,
+      "hub_ports": [
+        146,
+        176,
+        282,
+        48,
+        102
+      ],
+      "strategy": "Strategy: C\nSelected: hybrid\nReason 1: The top-3 share of 5.3% is within the threshold of 5.3%, and the average demand per lane is 95.8 TEU/lane, which is above the median demand of 30 TEU/lane, particularly in the corridor Port 146 -> Port 41 with 2,280 TEU/wk.\nReason 2: The high port count of 78 and lane count of 1129 indicate a complex network, which can be optimized with a hybrid strategy to balance direct and hub-and-spoke operations.\nHub Ports: [146, 176, 282, 48, 102]",
+      "explanation": "Verdict: Good\n  Profit margin 79.4% with coverage 75.4%.\n\nStrengths:\n- Weekly profit $104,822,735 (95 services) -> $1,103,397/service/week.\n- Satisfied 81,522 TEU/wk at 75.4% coverage.\n\nWeaknesses:\n- 24.6% unserved (26,664 TEU/wk).\n- Transshipment $6,521,760 + port $0/wk.\n\nImprovement Actions:\n- Add services to Port 146 -> Port 41: 2,280 TEU/week corridor.\n- Expand hub [146, 176, 282, 48, 102] by 9 services.",
+      "elapsed_sec": 102.63
+    },
+    {
+      "agent": "regional_europe",
+      "region": "Europe",
+      "status": "Optimal",
+      "services_generated": 896,
+      "services_filtered": 400,
+      "services_selected": 88,
+      "weekly_profit": 65611321.133046746,
+      "annual_profit": 3411788698.918431,
+      "operating_cost": 20680000.0,
+      "transship_cost": 6473279.997096001,
+      "port_cost": 1922520.0,
+      "total_cost": 29075799.997096002,
+      "coverage_percent": 48.29074465283962,
+      "satisfied_demand": 84587.9999637,
+      "unserved_demand": 90576.0,
+      "total_demand": 175164,
+      "profit_margin_pct": 69.3,
+      "profit_per_service": 745583.0,
+      "cost_per_service": 330407.0,
+      "uncovered_teu": 90576.00003630001,
+      "hub_ports": [
+        221,
+        36,
+        75,
+        13,
+        86
+      ],
+      "strategy": "Strategy: C\nSelected: hybrid\nReason 1: The top-3 corridors (Port 221 -> Port 100, Port 36 -> Port 61, and Port 36 -> Port 69) have an average demand of 1,700 TEU/wk, which is significantly higher than the median demand of 24 TEU/lane. This indicates that these corridors are highly utilized and could benefit from a hybrid strategy.\nReason 2: With 132 ports and 3039 lanes in the Europe region, implementing a hybrid strategy will allow for more efficient use of resources and reduce congestion in high-demand corridors.",
+      "explanation": "Verdict: Good\n  [Cite margin 69.3% and coverage 48.3%]\n\nStrengths:\n- The weekly profit of $65,611,321 is substantial, indicating a strong financial performance.\n- The profit per service of $745,583/wk suggests efficient operations.\n- The coverage of 48.3% indicates that a significant portion of regional demand is being met.\n\nWeaknesses:\n- The unserved demand of 51.7% translates to 90,576 TEU/wk, highlighting a notable gap in service coverage.\n- The transship cost of $6,473,280 and port cost of $1,922,520 are areas for cost optimization.\n\nImprovement Actions:\n- Action 1: Increase service frequency or capacity on the Port 221 -> Port 100 corridor to reach the full potential of 1,932 TEU/wk, thereby reducing the unserved demand.\n- Action 2: Expand the hub ports [221, 36, 75, 13, 86] to increase coverage by 51.7% and reduce the gap in service, targeting an additional 90,576 TEU/wk.",
+      "elapsed_sec": 107.45
+    },
+    {
+      "agent": "regional_americas",
+      "region": "Americas",
+      "status": "Optimal",
+      "services_generated": 826,
+      "services_filtered": 400,
+      "services_selected": 83,
+      "weekly_profit": 480012688.03577805,
+      "annual_profit": 24960659777.86046,
+      "operating_cost": 20210000.0,
+      "transship_cost": 17371742.230079997,
+      "port_cost": 4134293.32761,
+      "total_cost": 41716035.557689995,
+      "coverage_percent": 57.5167173776244,
+      "satisfied_demand": 238008.77784599998,
+      "unserved_demand": 175799.22218529996,
+      "total_demand": 413808,
+      "profit_margin_pct": 92.0,
+      "profit_per_service": 5783285.0,
+      "cost_per_service": 502603.0,
+      "uncovered_teu": 175799.22215400002,
+      "hub_ports": [
+        235,
+        285,
+        100,
+        129,
+        41
+      ],
+      "strategy": "Strategy: C\nSelected: hybrid\nReason 1: The top-3 share of 5.1% is within the threshold, and the average demand per lane is 125.9 TEU/lane, which is greater than the median demand of 36 TEU/lane. Specifically, the top-3 corridors have an average demand of 125.9 TEU/lane, with the highest demand corridor being Port 285 -> Port 146 with 10,902 TEU/wk.\nReason 2: The port count of 87 and lane count of 3288 indicate a complex network, suggesting that a hybrid approach would be more effective in optimizing the network.",
+      "explanation": "**Verdict: Good**\n[Cite margin 92.0% and coverage 57.5%]\n\n**Strengths:**\n- The weekly profit of $480,012,688 and profit per service of $5,783,285 indicate a strong financial performance.\n- The coverage of 57.5% of regional demand is satisfactory, with 235,799 TEU served per week.\n\n**Weaknesses:**\n- The unserved demand of 42.5% translates to 175,799 TEU per week, indicating a significant gap in service coverage.\n- The high transship cost of $17,371,742 and port cost of $4,134,293 are areas for improvement.\n\n**Improvement Actions:**\n- **Action 1:** Target the corridor of Port 285 -> Port 146, which has a high volume of 10,902 TEU per week (2.6% of regional demand). To increase coverage, we can allocate additional services to this route, potentially increasing weekly TEU by 10% (1,090 TEU).\n- **Action 2:** Expand the hub ports [235, 285, 100, 129, 41] to address the 42.5% gap in service coverage. By increasing the capacity of these hubs, we can reduce the unserved demand by 10,000 TEU per week, bringing the coverage to 67.5%.",
+      "elapsed_sec": 108.04
+    },
+    {
+      "agent": "regional_middle_east",
+      "region": "Middle East",
+      "status": "Optimal",
+      "services_generated": 764,
+      "services_filtered": 400,
+      "services_selected": 69,
+      "weekly_profit": 55339177.411911316,
+      "annual_profit": 2877637225.4193883,
+      "operating_cost": 14730000.0,
+      "transship_cost": 2358720.0,
+      "port_cost": 0.0,
+      "total_cost": 17088720.0,
+      "coverage_percent": 85.07617728531855,
+      "satisfied_demand": 29484.0,
+      "unserved_demand": 5172.0,
+      "total_demand": 34656,
+      "profit_margin_pct": 76.4,
+      "profit_per_service": 802017.0,
+      "cost_per_service": 247663.0,
+      "uncovered_teu": 5172.000000000003,
+      "hub_ports": [
+        229,
+        225,
+        190,
+        108,
+        220
+      ],
+      "strategy": "Strategy: C\nSelected: hybrid\nReason 1: The top-3 share of 7.0% is below the threshold, but the median demand of 24 TEU/lane is above the average of 63.5 TEU/lane for the top-3 share, indicating a potential opportunity for hybrid optimization. Specifically, Port 220 has a high demand of 966 TEU/wk, which could be leveraged to improve overall efficiency.\nReason 2: With 50 ports and 546 lanes, there is a significant opportunity for optimization, particularly in the top-5 corridors, where 2,874 TEU/wk (8.3% of regional demand) are concentrated in just 5 lanes.\nHub Ports: [229, 225, 190, 108, 220]",
+      "explanation": "Verdict: Good\n  Profit margin 76.4% with coverage 85.1%.\n\nStrengths:\n- Weekly profit $55,339,177 (69 services) -> $802,017/service/week.\n- Satisfied 29,484 TEU/wk at 85.1% coverage.\n\nWeaknesses:\n- 14.9% unserved (5,172 TEU/wk).\n- Transshipment $2,358,720 + port $0/wk.\n\nImprovement Actions:\n- Add services to Port 220 -> Port 221: 966 TEU/week corridor.\n- Expand hub [229, 225, 190, 108, 220] by 6 services.",
+      "elapsed_sec": 54.47
+    },
+    {
+      "agent": "regional_africa",
+      "region": "Africa",
+      "status": "Optimal",
+      "services_generated": 812,
+      "services_filtered": 400,
+      "services_selected": 95,
+      "weekly_profit": 67918096.26935954,
+      "annual_profit": 3531741006.006696,
+      "operating_cost": 20940000.0,
+      "transship_cost": 4306080.000024,
+      "port_cost": 4207572.0,
+      "total_cost": 29453652.000024,
+      "coverage_percent": 59.88197108321038,
+      "satisfied_demand": 60882.0000003,
+      "unserved_demand": 40788.0,
+      "total_demand": 101670,
+      "profit_margin_pct": 69.8,
+      "profit_per_service": 714927.0,
+      "cost_per_service": 310038.0,
+      "uncovered_teu": 40787.999999700005,
+      "hub_ports": [
+        113,
+        112,
+        69,
+        114,
+        204
+      ],
+      "strategy": "Strategy: C\nSelected: hybrid\nReason 1: The top-3 corridors (Port 112 -> Port 176, Port 66 -> Port 13, Port 112 -> Port 69) account for 3.3% of regional demand, which meets the threshold. Additionally, the median demand per lane is 24 TEU, which is lower than the average demand per lane of the top-3 corridors (62.8 TEU/lane), indicating potential for hybrid optimization. Specifically, Port 112 has a high demand of 1,128 TEU/wk and 1,080 TEU/wk, suggesting that it can serve as a hub.\nReason 2: With 88 ports and 1620 lanes, there is a significant opportunity for optimization, particularly in the top-5 corridors, where 4 out of 5 corridors have demand above 1,000 TEU/wk.",
+      "explanation": "Verdict: Good\n  Profit margin 69.8% with coverage 59.9%.\n\nStrengths:\n- Weekly profit $67,918,096 (95 services) -> $714,927/service/week.\n- Satisfied 60,882 TEU/wk at 59.9% coverage.\n\nWeaknesses:\n- 40.1% unserved (40,788 TEU/wk).\n- Transshipment $4,306,080 + port $4,207,572/wk.\n\nImprovement Actions:\n- Add services to Port 112 -> Port 176: 1,128 TEU/week corridor.\n- Expand hub [113, 112, 69, 114, 204] by 9 services.",
+      "elapsed_sec": 106.44
+    }
+  ],
+  "decision_output": {
+    "agent": "coordinator",
+    "iteration": 1,
+    "status": "evaluated",
+    "global_metrics": {
+      "total_services": 430,
+      "total_profit": 773704018.1008376,
+      "annual_profit": 40232608941.24355,
+      "average_coverage": 65.2238336388358,
+      "min_coverage": 48.29074465283962,
+      "max_coverage": 85.07617728531855,
+      "coverage_variance": 36.78543263247893,
+      "total_cost": 97170000.0,
+      "total_satisfied_demand": 494484.7778463,
+      "total_unserved_demand": 338999.22218529996,
+      "profit_margin_pct": 88.8
+    },
+    "evaluation": {
+      "score": 3,
+      "max": 5,
+      "status": "moderate",
+      "reasons": [
+        "coverage 65.2% < target 70.0%",
+        "coverage variance 36.8% \u2014 regions imbalanced"
+      ]
+    },
+    "conflicts": [],
+    "resolution_log": [],
+    "decisions": {
+      "actions": [
+        {
+          "region": "Europe",
+          "action": "increase coverage_weight in GA",
+          "expected_gain": "+21.7% coverage"
+        },
+        {
+          "region": "Americas",
+          "action": "increase coverage_weight in GA",
+          "expected_gain": "+12.5% coverage"
+        },
+        {
+          "region": "Africa",
+          "action": "increase coverage_weight in GA",
+          "expected_gain": "+10.1% coverage"
+        }
+      ],
+      "priorities": [
+        "Raise coverage from 65.2% to 70.0%",
+        "Eliminate 0 conflict(s)"
+      ],
+      "weight_adjustments": {
+        "profit_weight": 0.452238336388358,
+        "coverage_weight": 0.44776166361164205,
+        "cost_weight": 0.1
+      },
+      "notes": "Rule-based fallback: coverage 65.2%, profit $773,704,018/week, 0 conflicts."
+    },
+    "feedback": {
+      "needs_rerun": true,
+      "rerun_reason": "coverage 65.2% is 4.8pp below 70.0% target",
+      "coverage_gap": 4.78,
+      "profit_gap": 0.0,
+      "conflict_severity": 0,
+      "weight_adjustments": {
+        "profit_weight": 0.428,
+        "coverage_weight": 0.472,
+        "cost_weight": 0.1
+      },
+      "convergence_score": 0.977,
+      "iteration": 1,
+      "at_iteration_cap": false,
+      "conflict_count": 0,
+      "low_coverage": true,
+      "low_profit": false
+    }
+  },
+  "executive_summary": "Verdict: Good\n  Profit margin 84.3% with 59.3% demand coverage.\n\nStrengths:\n- Weekly profit $773,704,018 across 430 services ($1,799,312/service/week).\n- Cost breakdown: operating $97,170,000, transship $37,031,582, port $10,264,385/week.\n\nWeaknesses:\n- 40.7% demand (338,999 TEU/week) unserved.\n- Cost per service $335,967/week limits expansion.\n\nPriority Actions:\n- Expand Europe (currently 48.3% coverage).\n- Route capacity to Port 285 -> Port 146 (10,902 TEU/week).",
+  "summary_metrics": {
+    "weekly_profit": 773704018.1008376,
+    "annual_profit": 40232608941.24355,
+    "operating_cost": 97170000.0,
+    "transship_cost": 37031582.230104,
+    "port_cost": 10264385.327610001,
+    "total_cost": 144465967.557714,
+    "cost": 144465967.557714,
+    "total_services": 430,
+    "satisfied_demand": 494484.7778463,
+    "unserved_demand": 338999.22218529996,
+    "coverage": 59.3274469391494
+  },
+  "iteration_audit": [
+    {
+      "iteration": 0,
+      "weights_used": {
+        "profit_weight": 0.5,
+        "coverage_weight": 0.4,
+        "cost_weight": 0.1
+      },
+      "profit": 772110592.2744836,
+      "coverage": 64.79707751783197,
+      "convergence_score": 0.975,
+      "coverage_gap": 5.2,
+      "conflict_severity": 0,
+      "needs_rerun": true,
+      "rerun_reason": "coverage 64.8% is 5.2pp below 70.0% target",
+      "resolution_log": []
+    },
+    {
+      "iteration": 1,
+      "weights_used": {
+        "profit_weight": 0.4479707751783196,
+        "coverage_weight": 0.4520292248216804,
+        "cost_weight": 0.1
+      },
+      "profit": 773704018.1008376,
+      "coverage": 65.2238336388358,
+      "convergence_score": 0.977,
+      "coverage_gap": 4.78,
+      "conflict_severity": 0,
+      "needs_rerun": true,
+      "rerun_reason": "coverage 65.2% is 4.8pp below 70.0% target",
+      "resolution_log": []
+    }
+  ],
+  "iterations_run": 2
+}

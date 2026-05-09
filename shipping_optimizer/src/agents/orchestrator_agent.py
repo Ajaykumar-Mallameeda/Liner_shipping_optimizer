@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Callable, Optional
 
 from src.llm.evaluator                   import LLMEvaluator
 from src.agents.base                     import BaseAgent
@@ -39,6 +39,9 @@ class OrchestratorAgent(BaseAgent):
         # Each entry: {iteration, before_coverage, before_profit, after_coverage,
         #              after_profit, feedback_applied, weights_used}
         self.iteration_audit: List[Dict] = []
+
+        # ── Callback support for real-time updates ────────────────────────────
+        self.callback: Optional[Callable] = None
 
     def get_system_prompt(self) -> str:
         return (
@@ -249,15 +252,42 @@ class OrchestratorAgent(BaseAgent):
             conflict_severity=feedback.get("conflict_severity", 0),
         )
 
+        # Send callback if registered
+        if self.callback:
+            self.callback("feedback_applied", {
+                "before_weights": before,
+                "after_weights": {
+                    "profit_weight":   problem.profit_weight,
+                    "coverage_weight": problem.coverage_weight,
+                    "cost_weight":     problem.cost_weight,
+                },
+                "coverage_gap": feedback.get("coverage_gap", 0),
+                "conflict_severity": feedback.get("conflict_severity", 0)
+            })
+
         return problem
 
     # ================================================================
     # Main process
     # ================================================================
 
+    def set_callback(self, callback: Callable[[str, Dict], None]):
+        """Set callback function for real-time updates"""
+        self.callback = callback
+
     def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         logger.info("orchestrator_started")
         problem: Problem = input_data["problem"]
+
+        # Send callback if registered
+        if self.callback:
+            self.callback("pipeline_started", {
+                "problem_size": {
+                    "ports": len(problem.ports),
+                    "lanes": len(problem.demands),
+                    "services": len(problem.services)
+                }
+            })
 
         # Capture TRUE global demand BEFORE splitting
         true_global_demand = sum(d.weekly_teu for d in problem.demands)
@@ -270,12 +300,42 @@ class OrchestratorAgent(BaseAgent):
         # Validation: ensure we have enough regional agents
         assert len(self.regional_agents) >= n_clusters, f"Expected at least {n_clusters} regional agents, got {len(self.regional_agents)}"
 
+        # Send callback for problem analysis
+        if self.callback:
+            self.callback("stage_started", {
+                "stage": "Problem Analysis",
+                "stage_id": "analysis"
+            })
+
         analysis = self.analyze_problem(problem)
         logger.info("problem_analysis_complete")
+
+        # Send callback for analysis completion
+        if self.callback:
+            self.callback("stage_completed", {
+                "stage": "Problem Analysis",
+                "stage_id": "analysis",
+                "analysis": analysis
+            })
+
+        # Send callback for decomposition
+        if self.callback:
+            self.callback("stage_started", {
+                "stage": "Problem Decomposition",
+                "stage_id": "decomposition"
+            })
 
         # Decompose
         clustering = PortClustering(n_clusters=n_clusters)
         clusters   = clustering.cluster_ports(problem.ports)
+
+        # Send callback for decomposition completion
+        if self.callback:
+            self.callback("stage_completed", {
+                "stage": "Problem Decomposition",
+                "stage_id": "decomposition",
+                "clusters": len(clusters)
+            })
 
         # Validation: ensure we have correct number of clusters
         assert len(clusters) == n_clusters, f"Expected {n_clusters} clusters, got {len(clusters)}"
@@ -292,12 +352,26 @@ class OrchestratorAgent(BaseAgent):
         for iteration in range(MAX_ITERATIONS):
             logger.info("iteration_start", iteration=iteration)
 
+            # Send callback for iteration start
+            if self.callback:
+                self.callback("iteration_started", {
+                    "iteration": iteration,
+                    "max_iterations": MAX_ITERATIONS
+                })
+
             # Snapshot weights before this iteration
             weights_before = {
                 "profit_weight":   getattr(problem, "profit_weight",   0.5),
                 "coverage_weight": getattr(problem, "coverage_weight", 0.4),
                 "cost_weight":     getattr(problem, "cost_weight",     0.1),
             }
+
+            # Send callback for regional optimization
+            if self.callback:
+                self.callback("stage_started", {
+                    "stage": "Regional Optimization",
+                    "stage_id": "regional"
+                })
 
             splitter          = RegionalSplitter(problem)
             regional_problems = splitter.split(clusters)
@@ -323,10 +397,39 @@ class OrchestratorAgent(BaseAgent):
                     future = executor.submit(agent.process, {"problem": rp})
                     futures.append(future)
 
-                # Collect results
-                for future in futures:
+                # Collect results and send callbacks
+                for i, future in enumerate(futures):
                     result = future.result()
                     regional_results.append(result)
+
+                    # Send callback for region completion
+                    if self.callback and i < len(self.regional_agents):
+                        agent = self.regional_agents[i]
+                        region_id = agent.name.replace("regional_", "")
+                        self.callback("region_updated", {
+                            "region_id": region_id,
+                            "name": region_id.title(),
+                            "profit": result.get("weekly_profit", 0),
+                            "coverage": result.get("coverage_percent", 0),
+                            "services": result.get("services_selected", 0),
+                            "margin": ((result.get("weekly_profit", 0) /
+                                       (result.get("weekly_profit", 0) + result.get("total_cost", 0))) * 100)
+                                     if result.get("weekly_profit", 0) + result.get("total_cost", 0) > 0 else 0,
+                            "cost": result.get("operating_cost", 0),
+                            "uncovered": result.get("unserved_demand", 0),
+                            "hubs": result.get("hub_ports", []),
+                            "strategy": "hybrid",
+                            "generated": result.get("services_generated", 0),
+                            "filtered": result.get("services_filtered", 0),
+                            "selected": result.get("services_selected", 0)
+                        })
+
+            # Send callback for regional completion
+            if self.callback:
+                self.callback("stage_completed", {
+                    "stage": "Regional Optimization",
+                    "stage_id": "regional"
+                })
 
             # Snapshot metrics after this iteration
             iter_profit   = sum(r.get("weekly_profit", 0) for r in regional_results)
@@ -334,6 +437,13 @@ class OrchestratorAgent(BaseAgent):
                 sum(r.get("coverage_percent", 0) for r in regional_results) /
                 len(regional_results)
             ) if regional_results else 0.0
+
+            # Send callback for coordinator
+            if self.callback:
+                self.callback("stage_started", {
+                    "stage": "Coordinator Agent",
+                    "stage_id": "coordinator"
+                })
 
             # Coordinator with iteration counter for cap enforcement
             decision_output = self.coordinator.process({
@@ -344,6 +454,15 @@ class OrchestratorAgent(BaseAgent):
 
             feedback  = decision_output["feedback"]
             decisions = decision_output["decisions"]
+
+            # Send callback for coordinator completion
+            if self.callback:
+                self.callback("stage_completed", {
+                    "stage": "Coordinator Agent",
+                    "stage_id": "coordinator",
+                    "conflicts_detected": feedback.get("conflict_severity", 0) > 0,
+                    "conflicts_resolved": len(decision_output.get("resolution_log", []))
+                })
 
             logger.info(
                 "iteration_complete",
@@ -369,6 +488,23 @@ class OrchestratorAgent(BaseAgent):
                 "resolution_log":     decision_output.get("resolution_log", []),
             })
 
+            # Send callback for iteration completion
+            if self.callback:
+                self.callback("iteration_completed", {
+                    "iteration": iteration,
+                    "iter": iteration,
+                    "profit": iter_profit,
+                    "coverage": iter_coverage,
+                    "score": feedback["convergence_score"],
+                    "rerun": feedback["needs_rerun"],
+                    "reason": feedback["rerun_reason"],
+                    "total_services": sum(r.get("services_selected", 0) for r in regional_results),
+                    "operating_cost": sum(r.get("operating_cost", 0) for r in regional_results),
+                    "margin": (iter_profit / (iter_profit + sum(r.get("total_cost", 0) for r in regional_results))) * 100
+                                 if iter_profit + sum(r.get("total_cost", 0) for r in regional_results) > 0 else 0,
+                    "regions": regional_results
+                })
+
             # ── STOP CONDITION ─────────────────────────────────────────────
             if not feedback["needs_rerun"]:
                 logger.info(
@@ -377,6 +513,15 @@ class OrchestratorAgent(BaseAgent):
                     coverage=f"{iter_coverage:.1f}%",
                     convergence_score=feedback["convergence_score"],
                 )
+
+                # Send callback for convergence
+                if self.callback:
+                    self.callback("convergence_reached", {
+                        "iteration": iteration,
+                        "score": feedback["convergence_score"],
+                        "reason": feedback["rerun_reason"]
+                    })
+
                 break
 
             if prev_coverage >= 0 and (iter_coverage - prev_coverage) < 1.0:
@@ -393,6 +538,12 @@ class OrchestratorAgent(BaseAgent):
             problem = self._apply_feedback(problem, decision_output)
 
         # ── Final aggregation ──────────────────────────────────────────────
+        if self.callback:
+            self.callback("stage_started", {
+                "stage": "Global Aggregation",
+                "stage_id": "aggregation"
+            })
+
         metrics = self.aggregate_results(regional_results, true_global_demand)
 
         weekly_profit  = metrics["weekly_profit"]
@@ -491,6 +642,23 @@ class OrchestratorAgent(BaseAgent):
 
         logger.info("orchestrator_complete")
 
+        # Send final callback
+        if self.callback:
+            self.callback("pipeline_completed", {
+                "results": {
+                    "weekly_profit": metrics["weekly_profit"],
+                    "annual_profit": metrics["annual_profit"],
+                    "coverage": metrics["coverage"],
+                    "total_services": metrics["total_services"],
+                    "margin": profit_margin_pct,
+                    "operating_cost": metrics["operating_cost"],
+                    "unserved": metrics["unserved_demand"],
+                    "convergence_score": feedback.get("convergence_score", 0),
+                    "iterations": len(self.iteration_audit),
+                    "regional_results": regional_results
+                }
+            })
+
         return {
             "orchestrator":      self.name,
             "status":            "complete",
@@ -499,6 +667,6 @@ class OrchestratorAgent(BaseAgent):
             "decision_output":   decision_output,
             "executive_summary": executive_summary,
             "summary_metrics":   metrics,
-            "iteration_audit":   self.iteration_audit,   
+            "iteration_audit":   self.iteration_audit,
             "iterations_run":    len(self.iteration_audit),
         }
