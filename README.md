@@ -84,6 +84,9 @@ The objective is to maximize network profit (revenue minus operating, transshipm
 
 ---
 
+<img width="2020" height="773" alt="Flowchart" src="https://github.com/user-attachments/assets/7194a3e5-4372-4d1c-ad4a-c28a6dbc6722" />
+
+
 ## Optimization Pipeline
 
 ### Phase 1 — Problem Decomposition
