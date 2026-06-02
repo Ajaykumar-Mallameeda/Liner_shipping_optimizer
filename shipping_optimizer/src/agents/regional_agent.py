@@ -9,12 +9,13 @@ from src.optimization.data              import Problem, Service
 from src.optimization.hierarchical_ga   import HierarchicalGA
 from src.optimization.hub_milp          import HubMILP
 from src.services.hub_detector          import HubDetector
+from src.utils.fuel_cost                import map_capacity_to_vessel_class
 
 logger = logging.getLogger(__name__)
 
 # ── Shared cost constants — identical in GA and MILP ──────────────────
 TRANSSHIP_COST_PER_TEU = 80.0
-PORT_COST_PER_TEU      = 15.0
+PORT_COST_PER_TEU      = 0.0  # Use dataset port costs only
 ALPHA_UNSERVED         = 300.0
 MIN_COVERAGE_FLOOR     = 0.0    
 MAX_TRANSFER_PAIRS     = 2000   
@@ -164,16 +165,24 @@ class RegionalAgent(BaseAgent):
         services_generated = len(services)
 
         norm: List[Service] = []
+        # Region-prefix ensures globally unique service IDs (e.g. asia_svc_001)
+        region_prefix = self.region.lower().replace(" ", "_")
         for i, s in enumerate(services):
             if isinstance(s, Service):
                 norm.append(s)
             else:
+                capacity = s.get("capacity", 5000)
+                vessel_class = s.get("vessel_class", map_capacity_to_vessel_class(capacity))
                 norm.append(Service(
                     id=s.get("id", i), ports=s["ports"],
-                    capacity=s.get("capacity", 5000),
+                    capacity=capacity,
                     weekly_cost=s.get("weekly_cost", 150_000),
                     cycle_time=s.get("cycle_time", 14),
+                    vessel_class=vessel_class
                 ))
+        # Namespace service IDs with region prefix to avoid global collisions
+        for idx, s in enumerate(norm):
+            s.id = f"{region_prefix}_svc_{idx:03d}"
         problem.services = norm
 
         # ── Smart service filter ───────────────────────────────────────
@@ -182,19 +191,31 @@ class RegionalAgent(BaseAgent):
 
         # ── HierarchicalGA ─────────────────────────────────────────────
         logger.info("hierarchical_ga_started")
-        ga = HierarchicalGA(
-            problem,
-            w_profit = getattr(problem, "profit_weight", 0.5),
-            w_coverage = getattr(problem, "coverage_weight", 0.4),
-            w_cost = getattr(problem, "cost_weight", 0.1),
-            alpha_unserved         = ALPHA_UNSERVED,
-            max_runtime_sec        = 55.0,
-            transship_cost_per_teu = TRANSSHIP_COST_PER_TEU,
-            port_cost_per_teu      = PORT_COST_PER_TEU,
-        )
-        chromosome        = ga.run()
-        services_selected = sum(chromosome["services"])
-        logger.info("ga_complete", services_selected=services_selected)
+        try:
+            ga = HierarchicalGA(
+                problem,
+                w_profit = getattr(problem, "profit_weight", 0.5),
+                w_coverage = getattr(problem, "coverage_weight", 0.4),
+                w_cost = getattr(problem, "cost_weight", 0.1),
+                alpha_unserved         = ALPHA_UNSERVED,
+                max_runtime_sec        = 55.0,
+                transship_cost_per_teu = TRANSSHIP_COST_PER_TEU,
+                port_cost_per_teu      = PORT_COST_PER_TEU,
+                objective_mode         = getattr(problem, "objective_mode", "profit_first"),
+            )
+            chromosome        = ga.run()
+            services_selected = sum(chromosome["services"])
+            logger.info("ga_complete", services_selected=services_selected)
+        except Exception as e:
+            logger.error("ga_failed", region=self.region, error=str(e))
+            # Fallback to empty chromosome
+            chromosome = {
+                "services": [0] * len(problem.services),
+                "frequencies": [0] * len(problem.services),
+                "coverage_estimate": 0.0,
+                "skip_milp": False
+            }
+            services_selected = 0
         
         # ── MILP decomposition by hub clusters ─────────────────────────
         logger.info("milp_decomposition_started")
@@ -225,20 +246,67 @@ class RegionalAgent(BaseAgent):
                 min_coverage           = MIN_COVERAGE_FLOOR,
                 max_transfer_pairs     = MAX_TRANSFER_PAIRS,
             )
-            cluster_results.append(milp.solve())
+            logger.info("milp_solve_started", hub=hub, cluster_ports=len(ports))
+            try:
+                result = milp.solve()
+                logger.info("milp_solve_complete", hub=hub, status=result.get("status", "unknown"))
+                cluster_results.append(result)
+            except Exception as e:
+                logger.error("milp_solve_failed", hub=hub, error=str(e))
+                # Add fallback result to maintain pipeline integrity
+                cluster_results.append({
+                    "status": "Failed",
+                    "profit": 0.0,
+                    "cost": 0.0,
+                    "transship_cost": 0.0,
+                    "port_cost": 0.0,
+                    "total_cost": 0.0,
+                    "coverage": 0.0,
+                    "satisfied_demand": 0.0,
+                    "direct_demand": 0.0,
+                    "transship_demand": 0.0,
+                    "total_demand": sum(d.weekly_teu for d in sub.demands),
+                    "unserved_demand": sum(d.weekly_teu for d in sub.demands),
+                    "selected_services": []
+                })
 
         # Aggregate services and clusters
-        all_selected_services = []
+        # Deduplicate by service id — the same service can be selected in
+        # multiple hub clusters; merge entries by summing load and economics.
+        merged: Dict[str, Dict] = {}
         for r in cluster_results:
             if "selected_services" in r:
                 for svc in r["selected_services"]:
-                    svc["region"] = self.region
-                    all_selected_services.append(svc)
+                    sid = svc.get("id", "?")
+                    if sid in merged:
+                        prev = merged[sid]
+                        prev["load"]       = (prev.get("load", 0.0) or 0.0) + (svc.get("load", 0.0) or 0.0)
+                        prev["revenue"]    = (prev.get("revenue", 0.0) or 0.0) + (svc.get("revenue", 0.0) or 0.0)
+                        prev["cost"]       = (prev.get("cost", 0.0) or 0.0) + (svc.get("cost", 0.0) or 0.0)
+                        prev["vessel_cost"]= (prev.get("vessel_cost", 0.0) or 0.0) + (svc.get("vessel_cost", 0.0) or 0.0)
+                        prev["fuel_cost"]  = (prev.get("fuel_cost", 0.0) or 0.0) + (svc.get("fuel_cost", 0.0) or 0.0)
+                        prev["port_cost"]  = (prev.get("port_cost", 0.0) or 0.0) + (svc.get("port_cost", 0.0) or 0.0)
+                        prev["weekly_profit"] = (prev.get("weekly_profit", 0.0) or 0.0) + (svc.get("weekly_profit", 0.0) or 0.0)
+                    else:
+                        merged[sid] = dict(svc)
+        # Attach region and freeze
+        all_selected_services = []
+        for sid, svc in merged.items():
+            svc["region"] = self.region
+            # Recompute margin from totals so it remains consistent
+            rev = svc.get("revenue", 0.0) or 0.0
+            cst = svc.get("cost", 0.0) or 0.0
+            svc["weekly_profit"] = rev - cst
+            svc["margin_pct"] = round(
+                (rev - cst) / rev * 100, 2
+            ) if rev > 0 else 0.0
+            all_selected_services.append(svc)
 
         # ── Aggregate — use regional total_demand as denominator ────────
         # (Not sum of cluster total_demand which double-counts cross-cluster OD)
         profit         = sum(r["profit"]           for r in cluster_results)
         operating_cost = sum(r["cost"]             for r in cluster_results)
+        fuel_cost      = sum(r.get("fuel_cost", 0) for r in cluster_results)
         transship_cost = sum(r["transship_cost"]   for r in cluster_results)
         port_cost      = sum(r["port_cost"]        for r in cluster_results)
         total_cost     = sum(r["total_cost"]       for r in cluster_results)
@@ -300,8 +368,8 @@ class RegionalAgent(BaseAgent):
                 raise ValueError("invalid")
         except Exception:
             verdict = (
-                "Good" if profit_margin_pct > 60 else
-                "Moderate" if profit_margin_pct > 30 else "Poor"
+                "Good" if profit_margin_pct > 25 else
+                "Moderate" if profit_margin_pct > 15 else "Poor"
             )
             explanation = (
                 f"Verdict: {verdict}\n"
@@ -312,6 +380,7 @@ class RegionalAgent(BaseAgent):
             )
 
         elapsed = time.perf_counter() - t0
+
         return {
             "agent":               self.name,
             "region":              self.region,
@@ -322,6 +391,7 @@ class RegionalAgent(BaseAgent):
             "weekly_profit":       profit,
             "annual_profit":       profit * 52,
             "operating_cost":      operating_cost,
+            "fuel_cost":           fuel_cost,
             "transship_cost":      transship_cost,
             "port_cost":           port_cost,
             "total_cost":          total_cost,

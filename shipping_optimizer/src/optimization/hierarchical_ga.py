@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 from src.optimization.service_ga    import ServiceGA
 from src.optimization.frequency_ga  import FrequencyGA
+from src.config.optimizer_config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,15 @@ class HierarchicalGA:
         alpha_unserved: float = 50.0,
         
         transship_cost_per_teu: float = 80.0,
-        port_cost_per_teu: float = 15.0,
+        port_cost_per_teu: float = 0.0,  # Default to 0 to force use of dataset costs
         # pass-through to FrequencyGA
         max_freq: int    = 3,
         # runtime budget
         max_runtime_sec: float = 60.0,   # FIX 6: hard budget 60s (was ~200s+)
         # demand threshold for service filtering
         min_route_demand_threshold: float = 0.0,   # TEU — 0 = keep all
+        # objective mode
+        objective_mode: str = "profit_first",  # "legacy" or "profit_first"
     ):
         self.problem  = problem
         self.max_time = max_runtime_sec
@@ -39,9 +42,10 @@ class HierarchicalGA:
             w_coverage    = w_coverage,
             w_cost        = w_cost,
             alpha_unserved = alpha_unserved,
-            
+
             transship_cost_per_teu = transship_cost_per_teu,
             port_cost_per_teu = port_cost_per_teu,
+            objective_mode = objective_mode,
         )
         self._fga_kwargs = dict(max_freq = max_freq)
         self.min_demand_threshold = min_route_demand_threshold
@@ -58,6 +62,10 @@ class HierarchicalGA:
         for d in self.problem.demands:
             corridor_set.add((d.origin, d.destination))
 
+        # Calculate average revenue per TEU for more accurate margin checks
+        total_demand = sum(d.weekly_teu for d in self.problem.demands)
+        avg_rev_per_teu = sum(d.weekly_teu * d.revenue_per_teu for d in self.problem.demands) / total_demand if total_demand > 0 else 150
+
         kept = []
         for svc in self.problem.services:
             port_set = set(svc.ports)
@@ -66,9 +74,61 @@ class HierarchicalGA:
                 o in port_set and d in port_set
                 for (o, d) in corridor_set
             )
-            # Basic margin check: expected revenue at 50% utilisation > cost
-            margin_ok = (svc.capacity * 0.5 * 150) > svc.weekly_cost
-            if covers and margin_ok:
+
+            # Enhanced profitability gate
+            # 1. Estimate direct demand for this service
+            direct_demand = 0.0
+            for d in self.problem.demands:
+                if d.origin in port_set and d.destination in port_set:
+                    direct_demand += d.weekly_teu
+
+            # 2. Calculate expected revenue at realistic utilization (60% for direct, 30% for indirect)
+            expected_utilization = 0.6 if direct_demand > 0 else 0.3
+            expected_teu = svc.capacity * expected_utilization
+            expected_revenue = expected_teu * avg_rev_per_teu
+
+            # 3. Estimate total costs (weekly + fuel + port)
+            estimated_fuel = svc.weekly_cost * 0.3  # Fuel typically ~30% of operating cost
+            estimated_port = len(svc.ports) * 5000  # Rough port cost estimate
+            total_estimated_cost = svc.weekly_cost + estimated_fuel + estimated_port
+
+            # 4. Check margin - apply enhanced profitability gate with strategic exceptions
+            expected_margin = expected_revenue - total_estimated_cost
+            margin_pct = expected_margin / total_estimated_cost if total_estimated_cost > 0 else -1.0
+
+            # Enhanced strategic classification
+            is_strategic = (
+                len(svc.ports) <= 2 and  # Direct services
+                expected_utilization > 0.5  # With high utilization
+            )
+            is_feeder_critical = (
+                len(svc.ports) == 2 and
+                direct_demand == 0 and  # No direct demand (pure feeder)
+                any(p in port_set for p in ['HKG', 'SIN', 'ROT', 'NYC'])  # Connects to major hub
+            )
+            is_hub_connector = (
+                len(svc.ports) == 2 and
+                port_set.intersection(['HKG', 'SIN', 'ROT', 'NYC', 'SHA', 'CNXHG', 'SGSIN', 'NLRTM', 'USLAX'])  # Hub ports
+            )
+
+            # Tiered profitability requirements
+            if is_strategic:
+                min_margin_pct = 0.0  # No minimum for strategic services
+            elif is_feeder_critical:
+                min_margin_pct = -0.15  # Allow 15% loss for critical feeders
+            elif is_hub_connector:
+                min_margin_pct = -0.10  # Allow 10% loss for hub connectors
+            else:
+                min_margin_pct = 0.05  # 5% minimum margin for regular services
+
+            # Additional checks for service viability
+            capacity_efficiency = expected_teu / svc.capacity if svc.capacity > 0 else 0
+            teu_threshold = max(500, svc.capacity * 0.1)  # Minimum 10% utilization or 500 TEU
+
+            margin_ok = margin_pct > min_margin_pct or (covers and margin_pct > -0.05)
+            utilization_ok = capacity_efficiency > 0.1 or expected_teu > teu_threshold
+
+            if covers and margin_ok and utilization_ok:
                 kept.append(svc)
 
         before = len(self.problem.services)
@@ -95,7 +155,8 @@ class HierarchicalGA:
 
         elapsed = time.perf_counter() - t0
         if elapsed > self.max_time * 0.8:
-            logger.warning("ga_runtime_budget_near | elapsed=%.2fs", elapsed)
+            if CONFIG.verbose_runtime_logs:
+                logger.warning("ga_runtime_budget_near | elapsed=%.2fs", elapsed)
 
         # ── Level 2: frequency optimisation ───────────────────────────
         freq_ga   = FrequencyGA(self.problem, best_services, **self._fga_kwargs)

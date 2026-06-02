@@ -4,7 +4,10 @@ import heapq
 import numpy as np
 import time
 from collections import defaultdict
-from typing import List, Optional
+from typing import List, Optional, Dict
+from src.utils.fuel_cost import calculate_weekly_fuel_cost
+from src.optimization.normalization import ObjectiveNormalizer, ObjectiveWeights
+from src.config.optimizer_config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ class ServiceGA:
         problem,
         pop_size: int = 80,
         generations: int = 120,
-        # Multi-objective weights
+        # Multi-objective weights (legacy for backward compatibility)
         w_profit: float = 0.5,
         w_coverage: float = 0.4,
         w_cost: float = 0.1,
@@ -32,18 +35,20 @@ class ServiceGA:
         gamma_alignment: float = 0.3,       # penalty for zero-demand services
         # Transshipment / port cost pass-through estimates
         transship_cost_per_teu: float = 80.0,
-        port_cost_per_teu: float = 15.0,
+        port_cost_per_teu: float = 0.0,  # Default to 0 to force use of dataset costs
         # LLM budget
         llm_budget: int = 0,                # set >0 to enable LLM assist
+        # Objective mode
+        objective_mode: str = "legacy",    # "legacy" or "profit_first"
     ):
         self.problem     = problem
         self.generations = generations
         self.pop_size    = pop_size
 
-        # Weights & penalties
-        self.w_profit   = w_profit
-        self.w_coverage = w_coverage
-        self.w_cost     = w_cost
+        # Weights & penalties - use problem weights if available
+        self.w_profit   = getattr(problem, "profit_weight", w_profit)
+        self.w_coverage = getattr(problem, "coverage_weight", w_coverage)
+        self.w_cost     = getattr(problem, "cost_weight", w_cost)
         self.alpha      = alpha_unserved
         self.beta       = beta_overcapacity
         self.gamma      = gamma_alignment
@@ -53,6 +58,11 @@ class ServiceGA:
         self.llm_budget   = llm_budget
         self.mutation_rate = 0.15
         self.fitness_cache: dict = {}
+
+        # Objective normalization and weight configuration
+        self.normalizer = ObjectiveNormalizer()
+        self.objective_mode = objective_mode or CONFIG.objective_mode
+        self.objective_weights = ObjectiveWeights(mode=self.objective_mode)
 
         self.num_services = len(problem.services)
         self.total_demand = sum(d.weekly_teu for d in problem.demands)
@@ -161,8 +171,9 @@ class ServiceGA:
         if not isinstance(services, list):
             return -1e12
 
-        # Use bytes for faster cache key creation 
-        key = bytes(services)
+        # Use bytes for faster cache key creation - include weights to prevent stale cache
+        weight_tuple = (self.w_profit, self.w_coverage, self.w_cost)
+        key = bytes(services) + str(weight_tuple).encode()
         if key in self.fitness_cache:
             return self.fitness_cache[key]
 
@@ -173,9 +184,11 @@ class ServiceGA:
         # ── Revenue: demand-driven ─────────────────────────────────────
         satisfied_demand = 0.0
         operating_cost   = 0.0
+        fuel_cost        = 0.0
         revenue = 0.0
         port_cost        = 0.0
         alignment_penalty = 0.0
+        negative_service_penalty = 0.0
 
         covered_corridors: dict = {}   # corridor → TEU satisfied
 
@@ -207,15 +220,62 @@ class ServiceGA:
             # Operating cost
             operating_cost += svc.weekly_cost
 
+            # Fuel cost based on vessel class and distance
+            fuel_cost += calculate_weekly_fuel_cost(
+                svc.ports,
+                self.problem.distance_matrix,
+                svc.vessel_class or "Post_panamax",
+                svc.cycle_time or 7
+            )
+
             # Port handling cost (per port call)
             for p_id in svc.ports:
                 port = next((p for p in self.problem.ports if p.id == p_id), None)
-                port_hc = getattr(port, "handling_cost", 0.0) if port else 0.0
-                port_cost += served * (port_hc + self.pc_per_teu)
+                if port:
+                    port_hc = getattr(port, "handling_cost", 0.0)
+                    port_fixed = getattr(port, "port_call_cost", 0.0)
+                    port_var = getattr(port, "variable_port_call_cost", 0.0)
+                    # Use actual port costs if available, otherwise default
+                    handling_cost = port_hc  # Use dataset value even if zero
+                    fixed_cost = port_fixed if port_fixed > 0 else 0
+                    variable_cost = port_var if port_var > 0 else 0
+                    # Total port cost = handling + fixed + variable per TEU
+                    port_cost += served * handling_cost + fixed_cost + served * variable_cost
 
             # Demand-alignment penalty: penalise services with zero direct demand
             if direct == 0:
                 alignment_penalty += self.gamma * svc.weekly_cost
+
+            # Negative service penalty: penalize persistently loss-making services
+            service_revenue = served * self.avg_rev_per_teu
+
+            # Calculate actual service costs including fuel
+            service_fuel_cost = calculate_weekly_fuel_cost(
+                svc.ports,
+                self.problem.distance_matrix,
+                svc.vessel_class or "Post_panamax",
+                svc.cycle_time or 7
+            )
+            service_cost = svc.weekly_cost + service_fuel_cost + (served * port_hc if 'port_hc' in locals() else 0)
+            service_margin = service_revenue - service_cost
+
+            if service_margin < 0:
+                # Apply stronger penalty for negative margin services
+                margin_pct = service_margin / service_cost if service_cost > 0 else -1.0
+
+                # Enhanced penalty structure for P2
+                if margin_pct < -0.3:  # More than 30% loss
+                    negative_penalty = abs(service_margin) * 1.0  # 100% of loss
+                elif margin_pct < -0.2:  # 20-30% loss
+                    negative_penalty = abs(service_margin) * 0.7  # 70% of loss
+                elif margin_pct < -0.1:  # 10-20% loss
+                    negative_penalty = abs(service_margin) * 0.5  # 50% of loss
+                else:  # Small loss
+                    negative_penalty = abs(service_margin) * 0.2  # 20% of loss
+
+                # Increased cap for stronger impact
+                negative_penalty = min(negative_penalty, 100000)  # Max $100k penalty
+                negative_service_penalty += negative_penalty
 
         # Cap satisfied demand at total
         satisfied_demand = min(satisfied_demand, self.total_demand)
@@ -244,24 +304,119 @@ class ServiceGA:
         profit = (
             revenue
             - operating_cost
+            - fuel_cost
             - transship_cost
             - port_cost
             - unserved_penalty
             - overcap_penalty
             - alignment_penalty
+            - negative_service_penalty
         )
 
         coverage = satisfied_demand / (self.total_demand or 1.0)
 
-        # Multi-objective composite
-        fitness = (
-            self.w_profit   * profit
-            + self.w_coverage * coverage * 1e6   # scale coverage to profit magnitude
-            - self.w_cost   * operating_cost
-        )
+        # Gather all objective components for normalization
+        all_components = {
+            'profit': profit,
+            'coverage': coverage,
+            'cost': operating_cost,
+            'revenue': revenue,
+            'fuel_cost': fuel_cost,
+            'port_cost': port_cost,
+            'unserved_penalty': unserved_penalty,
+            'overcap_penalty': overcap_penalty,
+            'transship_cost': transship_cost,
+            'alignment_penalty': alignment_penalty,
+            'negative_service_penalty': negative_service_penalty,
+        }
+
+        # Normalize components
+        normalized = self.normalizer.normalize_objective_components(all_components)
+
+        # Calculate weighted score using configured weights
+        if self.objective_mode == "legacy":
+            # Use legacy weights for backward compatibility
+            # Apply weights directly without additional scaling to prevent dominance
+            fitness = (
+                self.w_profit * normalized['profit']
+                + self.w_coverage * normalized['coverage']
+                - self.w_cost * normalized['cost']
+            )
+        else:
+            # Use new weight system
+            fitness = self.objective_weights.calculate_weighted_score(normalized)
+
+        # Get weight contributions for transparency
+        contributions = self._calculate_weight_contributions(normalized)
+
+        # Log detailed objective information
+        if CONFIG.verbose_runtime_logs:
+            print("\n=== OBJECTIVE FUNCTION BREAKDOWN ===")
+            print(f"Objective Mode: {self.objective_mode.upper()}")
+            print("\nRaw Components:")
+            for name, value in all_components.items():
+                print(f"  {name}: {value:,.2f}")
+
+            print("\nNormalized Components:")
+            for name, value in normalized.items():
+                print(f"  {name}: {value:.6f}")
+
+            print("\nWeight Contributions:")
+            for name, percentage in contributions.items():
+                weight = self._get_actual_weight(name)
+                print(f"  {name}: {percentage:.1f}% (weight: {weight})")
+
+            print(f"\nFinal Fitness Score: {fitness:,.2f}")
+            print("=" * 35)
 
         self.fitness_cache[key] = fitness
         return fitness
+
+    # ------------------------------------------------------------------ #
+    #  Helper methods for weight calculations                           #
+    # ------------------------------------------------------------------ #
+    def _get_actual_weight(self, component: str) -> float:
+        """Get the actual weight being used for a component."""
+        if component == 'profit':
+            return self.w_profit
+        elif component == 'coverage':
+            return self.w_coverage
+        elif component == 'cost':
+            return self.w_cost
+        else:
+            return 0.0
+
+    def _calculate_weight_contributions(self, normalized: Dict[str, float]) -> Dict[str, float]:
+        """Calculate actual weight contributions based on applied weights."""
+        contributions = {}
+        total_score = 0.0
+        raw_contributions = {}
+
+        # Use the same calculation as in fitness
+        for component in ['profit', 'coverage', 'cost']:
+            if component in normalized:
+                value = normalized[component]
+                weight = self._get_actual_weight(component)
+
+                if component == 'cost':
+                    # Cost is subtracted
+                    contribution = -weight * value
+                else:
+                    contribution = weight * value
+
+                raw_contributions[component] = contribution
+                total_score += abs(contribution)
+
+        # Convert to percentages
+        if total_score > 0:
+            for component, contribution in raw_contributions.items():
+                contributions[component] = (abs(contribution) / total_score) * 100
+        else:
+            # If no score, distribute equally
+            equal_share = 100.0 / len(raw_contributions)
+            contributions = {c: equal_share for c in raw_contributions}
+
+        return contributions
 
     # ------------------------------------------------------------------ #
     #  GA operators                                                      #
@@ -279,8 +434,14 @@ class ServiceGA:
                     probs = [s / total for s in scores]
                     idx = random.choices(off_idx, weights=probs)[0]
                 else:
-                    # Fallback to random selection if all weights are zero
-                    idx = random.choice(off_idx)
+                    # Fallback: use partial demand if available, otherwise random
+                    partial_scores = [self.service_partial_demand[i] for i in off_idx]
+                    if sum(partial_scores) > 0:
+                        partial_total = sum(partial_scores)
+                        partial_probs = [s / partial_total for s in partial_scores]
+                        idx = random.choices(off_idx, weights=partial_probs)[0]
+                    else:
+                        idx = random.choice(off_idx)
                 child[idx] = 1
         else:
             idx = random.randint(0, self.num_services - 1)
@@ -307,7 +468,8 @@ class ServiceGA:
 
         for gen in range(self.generations):
             if time.time() - start_time > MAX_RUNTIME:
-                logger.info(f"ga_runtime_cap gen={gen} best_fitness={best_fitness}")
+                if CONFIG.verbose_runtime_logs:
+                    logger.info(f"ga_runtime_cap gen={gen} best_fitness={best_fitness}")
                 break
             #heapq for faster elite selection
             ranked = heapq.nlargest(10, zip(population, fitness), key=lambda x: x[1])

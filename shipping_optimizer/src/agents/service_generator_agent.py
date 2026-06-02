@@ -7,6 +7,7 @@ from src.agents.base                          import BaseAgent
 from src.services.hub_detector                import HubDetector
 from src.services.candidate_service_generator import CandidateServiceGenerator
 from src.optimization.data                    import Problem, Service
+from src.utils.fuel_cost                      import map_capacity_to_vessel_class
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,22 @@ class ServiceGeneratorAgent(BaseAgent):
         for d in top_demands[:top_n_direct]:
             if d.origin == d.destination:
                 continue
+            # Match vessel capacity to demand (with 20% buffer for growth)
+            demand_teu = d.weekly_teu
+            target_capacity = max(1000, demand_teu * 1.2)  # Min 1000 TEU, 20% buffer
+
+            # Round to nearest standard vessel size
+            standard_sizes = [1000, 2000, 4500, 8000, 12000, 16000]
+            closest_size = min(standard_sizes, key=lambda x: abs(x - target_capacity))
+
+            vessel_class = map_capacity_to_vessel_class(closest_size)
+            # Scale cost proportionally
+            weekly_cost = 150_000 * (closest_size / 8000)
+
             services.append(Service(
                 id=sid, ports=[d.origin, d.destination],
-                capacity=8000, weekly_cost=150_000, cycle_time=14,
+                capacity=closest_size, weekly_cost=weekly_cost, cycle_time=14,
+                vessel_class=vessel_class
             ))
             sid += 1
         logger.info("direct_services_added", count=top_n_direct)
@@ -84,9 +98,29 @@ class ServiceGeneratorAgent(BaseAgent):
                 if len(batch) < 2:
                     continue
                 route = [hub] + batch + [hub]  # loop back to hub
+
+                # Calculate total demand for this hub loop
+                loop_demand = sum(
+                    d.weekly_teu for d in problem.demands
+                    if all(p in route for p in [d.origin, d.destination])
+                )
+
+                # Size based on actual demand
+                if loop_demand > 8000:
+                    capacity = 14000
+                    weekly_cost = 280_000
+                elif loop_demand > 4000:
+                    capacity = 10000
+                    weekly_cost = 180_000
+                else:
+                    capacity = 8000
+                    weekly_cost = 150_000
+
+                vessel_class = map_capacity_to_vessel_class(capacity)
                 services.append(Service(
                     id=sid, ports=route,
-                    capacity=10000, weekly_cost=180_000, cycle_time=21,
+                    capacity=capacity, weekly_cost=weekly_cost, cycle_time=21,
+                    vessel_class=vessel_class
                 ))
                 sid += 1
                 loop_count += 1
@@ -96,9 +130,11 @@ class ServiceGeneratorAgent(BaseAgent):
         trunk_count = 0
         for i in range(len(top10_hubs)):
             for j in range(i + 1, len(top10_hubs)):
+                vessel_class = map_capacity_to_vessel_class(12000)
                 services.append(Service(
                     id=sid, ports=[top10_hubs[i], top10_hubs[j]],
                     capacity=12000, weekly_cost=200_000, cycle_time=14,
+                    vessel_class=vessel_class
                 ))
                 sid += 1
                 trunk_count += 1
@@ -127,9 +163,38 @@ class ServiceGeneratorAgent(BaseAgent):
             for best_hub in best_hubs:
                 if best_hub == spoke:
                     continue
+
+                # Calculate total demand for this spoke-hub pair
+                spoke_demand = sum(
+                    d.weekly_teu for d in problem.demands
+                    if (d.origin == spoke and d.destination == best_hub) or
+                       (d.origin == best_hub and d.destination == spoke)
+                )
+
+                # Size vessel based on demand with calibrated sizing
+                if spoke_demand > 5000:
+                    target_capacity = spoke_demand * 1.2  # 20% buffer for high-demand
+                    standard_sizes = [4500, 8000, 10000, 14000]
+                elif spoke_demand > 2000:
+                    target_capacity = spoke_demand * 1.3  # 30% buffer for medium-demand
+                    standard_sizes = [2000, 4500, 8000]
+                elif spoke_demand > 500:
+                    target_capacity = spoke_demand * 1.5  # 50% buffer for low-demand
+                    standard_sizes = [500, 1000, 2000, 4500]
+                else:
+                    target_capacity = 500  # Minimum viable size
+                    standard_sizes = [500, 1000]
+
+                closest_size = min(standard_sizes, key=lambda x: abs(x - target_capacity))
+
+                vessel_class = map_capacity_to_vessel_class(closest_size)
+                # Scale cost proportionally
+                weekly_cost = 70_000 * (closest_size / 4000)
+
                 services.append(Service(
                     id=sid, ports=[spoke, best_hub],
-                    capacity=4000, weekly_cost=70_000, cycle_time=7,
+                    capacity=closest_size, weekly_cost=weekly_cost, cycle_time=7,
+                    vessel_class=vessel_class
                 ))
                 sid += 1
                 feeder_count += 1

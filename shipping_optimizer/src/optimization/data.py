@@ -4,30 +4,38 @@ from typing import List, Dict
 
 @dataclass
 class Port:
-    id: int
+    id: str  # Changed from int to str to match JSON data
     name: str
     latitude: float
     longitude: float
     handling_cost: float = 0
     draft: float = 0
     port_call_cost: float = 0
+    transshipment_cost: float = 0
+    variable_port_call_cost: float = 0
 
 
 @dataclass
 class Service:
-    id: int
-    ports: List[int]
+    id: str  # Globally unique service identifier (e.g., "asia_svc_001")
+    ports: List[str]  # Changed to str to match Port IDs
     capacity: float
     weekly_cost: float
     cycle_time: int = 7
     speed: float = 18
     fuel_cost: float = 0
+    vessel_class: str = ""  # Added for fuel cost calculation
+
+    def __post_init__(self):
+        # Backward-compat: accept int IDs by stringifying them.
+        if not isinstance(self.id, str):
+            self.id = str(self.id)
 
 
 @dataclass
 class Demand:
-    origin: int
-    destination: int
+    origin: str  # Changed to str to match Port IDs
+    destination: str  # Changed to str
     weekly_teu: float
     revenue_per_teu: float
 

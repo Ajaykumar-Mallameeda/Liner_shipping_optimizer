@@ -41,10 +41,25 @@ class CandidateServiceGenerator:
 
             route = [origin]
 
-            # optional hub insertion
-            if random.random() < 0.6:
+            # optional hub insertion - calibrated for better strategy balance
+            hub_prob = 0.25  # Reduced to 25% for more direct services
 
-                hub = random.choice(list(self.problem.distance_matrix.keys()))
+            # Further reduce hub insertion for high-demand corridors
+            corridor_demand = sum(
+                d.weekly_teu for d in self.problem.demands
+                if d.origin == origin and d.destination == destination
+            )
+            if corridor_demand > 1000:  # High-demand corridor
+                hub_prob = 0.15  # Only 15% hub insertion for major corridors
+
+            if random.random() < hub_prob:
+                # Prefer actual major hubs over random ports
+                major_hubs = ['HKG', 'SIN', 'ROT', 'NYC', 'SHA', 'CNXHG', 'SGSIN', 'NLRTM', 'USLAX', 'DEBRV']
+                available_hubs = [h for h in major_hubs if h in self.problem.distance_matrix]
+                if available_hubs:
+                    hub = random.choice(available_hubs)
+                else:
+                    hub = random.choice(list(self.problem.distance_matrix.keys()))
                 route.append(hub)
 
             route.append(destination)
@@ -65,11 +80,28 @@ class CandidateServiceGenerator:
 
         ports = [p.id for p in self.problem.ports]
 
+        # Track hub usage to ensure balanced feeder distribution
+        hub_usage = {hub: 0 for hub in hubs}
+        feeders_per_hub = num // len(hubs)
+
         for _ in range(num):
 
-            hub = random.choice(hubs)
+            # Choose hub with least feeders for balance
+            hub = min(hubs, key=lambda h: hub_usage[h])
+            hub_usage[hub] += 1
 
-            spoke = random.choice(ports)
+            # Prefer nearby ports for realistic feeder routes
+            nearby_ports = []
+            if hub in self.problem.distance_matrix:
+                distances = self.problem.distance_matrix[hub]
+                # Sort by distance and take closer ports
+                sorted_ports = sorted(distances.items(), key=lambda x: x[1])
+                nearby_ports = [p for p, d in sorted_ports[:20] if p != hub]
+
+            if nearby_ports:
+                spoke = random.choice(nearby_ports)
+            else:
+                spoke = random.choice(ports)
 
             if hub == spoke:
                 continue

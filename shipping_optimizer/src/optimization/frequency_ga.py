@@ -4,6 +4,8 @@ import logging
 import numpy as np
 import time
 from typing import List
+from src.utils.fuel_cost import calculate_weekly_fuel_cost
+from src.config.optimizer_config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +26,15 @@ class FrequencyGA:
         pop_size: int = 40,
         generations: int = 60,
         overcap_penalty: float = 0.015,   # fraction of unused capacity × weekly_cost
+        port_cost_per_teu: float = 0.0,  # Default to 0 to force use of dataset costs
     ):
         self.problem    = problem
-        self.services   = services        
+        self.services   = services
         self.max_freq   = max_freq
         self.pop_size   = pop_size
         self.generations = generations
         self.beta       = overcap_penalty
+        self.pc_per_teu = port_cost_per_teu
 
         self.num_services = len(services)
         self.active_idx   = [i for i, v in enumerate(services) if v == 1]
@@ -111,7 +115,7 @@ class FrequencyGA:
     # ------------------------------------------------------------------ #
     def _evaluate(self, freq: List[int]) -> float:
         """
-        fitness = revenue − operating_cost − overcapacity_penalty
+        fitness = revenue − operating_cost − fuel_cost − port_cost − overcapacity_penalty
 
         revenue = Σ_i min(capacity_i × freq_i, route_demand_i) × avg_rev/teu
         """
@@ -128,6 +132,7 @@ class FrequencyGA:
         total_capacity  = 0.0
         satisfied       = 0.0
         operating_cost  = 0.0
+        fuel_cost       = 0.0
 
         avg_rev = (
             sum(d.weekly_teu * d.revenue_per_teu for d in self.problem.demands)
@@ -145,6 +150,34 @@ class FrequencyGA:
             satisfied      += served_i
             total_capacity += cap
             operating_cost += svc.weekly_cost * f
+            fuel_cost += calculate_weekly_fuel_cost(
+                svc.ports,
+                self.problem.distance_matrix,
+                svc.vessel_class or "Post_panamax",
+                svc.cycle_time or 7
+            ) * f
+
+        # Port costs for all services based on frequency
+        port_cost = 0.0
+        for i, f in enumerate(freq):
+            if f == 0 or self.services[i] == 0:
+                continue
+            svc = self.problem.services[i]
+            # Calculate port costs for this service based on frequency
+            for p_id in svc.ports:
+                port = next((p for p in self.problem.ports if p.id == p_id), None)
+                if port:
+                    port_hc = getattr(port, "handling_cost", 0.0)
+                    port_fixed = getattr(port, "port_call_cost", 0.0)
+                    port_var = getattr(port, "variable_port_call_cost", 0.0)
+                    # Use actual port costs if available, otherwise default
+                    handling_cost = port_hc  # Use dataset value even if zero
+                    fixed_cost = port_fixed if port_fixed > 0 else 0
+                    variable_cost = port_var if port_var > 0 else 0
+                    # Total port cost = handling + fixed + variable per TEU
+                    # TEU served is approximate: capacity * frequency * 7 / cycle_time
+                    teu_served = min(svc.capacity * f * (7 / (svc.cycle_time or 7)), self.route_demand[i] if i < len(self.route_demand) else 0)
+                    port_cost += teu_served * handling_cost + fixed_cost * f + teu_served * variable_cost
 
         revenue           = satisfied * avg_rev
         unused_cap        = max(0.0, total_capacity - satisfied)
@@ -153,12 +186,21 @@ class FrequencyGA:
         num_ports = len(self.problem.ports)
         num_hubs  = max(1, int(0.1 * num_ports))
 
-        hub_ratio = min(0.7, max(0.3, num_hubs / num_ports))
+        hub_ratio = min(0.7, max(0.3, num_hubs / max(1, num_ports)))
 
-        transship_cost = hub_ratio * satisfied * self.problem.demands[0].revenue_per_teu * 0.05
+        # Safe access to revenue_per_teu (handle empty demand list)
+        avg_rev_per_teu = self.problem.demands[0].revenue_per_teu if self.problem.demands else 1000.0
+        transship_cost = hub_ratio * satisfied * avg_rev_per_teu * 0.05
+
+        # Objective Weight Calibration Audit - Log raw component values
+        if CONFIG.verbose_runtime_logs:
+            print(f"FREQ_GA_OBJECTIVES: revenue={revenue:.2f}, operating_cost={operating_cost:.2f}, "
+                  f"fuel_cost={fuel_cost:.2f}, port_cost={port_cost:.2f}, "
+                  f"transship_cost={transship_cost:.2f}, overcap_penalty={overcap_penalty:.2f}, "
+                  f"satisfied_demand={satisfied:.2f}, total_capacity={total_capacity:.2f}")
 
         # Fleet already checked at top — no penalty needed here
-        return revenue - operating_cost - transship_cost - overcap_penalty
+        return revenue - operating_cost - transship_cost - overcap_penalty - port_cost
 
     # ------------------------------------------------------------------ #
     #  GA loop                                                              #
@@ -175,7 +217,8 @@ class FrequencyGA:
 
         for gen in range(self.generations):
             if time.time() - start_time > MAX_RUNTIME:
-                logger.info(f"frequency_ga_runtime_cap gen={gen} best_fitness={best_fitness}")
+                if CONFIG.verbose_runtime_logs:
+                    logger.info(f"frequency_ga_runtime_cap gen={gen} best_fitness={best_fitness}")
                 break
             ranked     = sorted(zip(population, fitness), key=lambda x: x[1], reverse=True)
             population = [x[0] for x in ranked[:10]]
