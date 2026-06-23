@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from collections import defaultdict
 
 from src.agents.base                          import BaseAgent
@@ -8,6 +8,7 @@ from src.services.hub_detector                import HubDetector
 from src.services.candidate_service_generator import CandidateServiceGenerator
 from src.optimization.data                    import Problem, Service
 from src.utils.fuel_cost                      import map_capacity_to_vessel_class
+from src.validation.archetype_validator       import validate_archetype_params, DEFAULT_ARCHETYPE_PARAMS
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class ServiceGeneratorAgent(BaseAgent):
     # ------------------------------------------------------------------
     # Core service generation
     # ------------------------------------------------------------------
-    def generate_services(self, problem: Problem) -> List[Service]:
+    def generate_services(self, problem: Problem, archetype_params: Optional[Dict] = None) -> List[Service]:
         logger.info(
             "service_generation_started",
             ports=len(problem.ports), demands=len(problem.demands),
@@ -43,10 +44,35 @@ class ServiceGeneratorAgent(BaseAgent):
         services: List[Service] = []
         sid = 0
 
-        # ── A: Direct services for top-500 high-demand corridors ───────
+        # ── Apply archetype params to influence generation mix ─────────
+        params = archetype_params or {}
+        arch_mix = params.get("archetype_mix", {})
+        if not arch_mix:
+            arch_mix = {k: v for k, v in params.items() if k.endswith("_ratio")} or {
+                "direct_ratio": 0.60, "hub_loop_ratio": 0.15, "feeder_ratio": 0.20, "trunk_ratio": 0.05
+            }
+        vb = params.get("vessel_bias", params.get("vessel_bias", "balanced"))
+        ratios_valid = all(k in arch_mix for k in ("direct_ratio", "hub_loop_ratio", "feeder_ratio", "trunk_ratio"))
+
+        if ratios_valid:
+            dr = arch_mix["direct_ratio"]
+            hl = arch_mix["hub_loop_ratio"]
+            fr = arch_mix["feeder_ratio"]
+            BASE_DR, BASE_HL, BASE_FR = 0.60, 0.15, 0.20
+            n_direct = min(800, max(200, int(500 * dr / max(BASE_DR, 0.01))))
+            hub_loop_count = max(2, int(10 * hl / max(BASE_HL, 0.01)))
+            feeder_count_target = max(20, int(100 * fr / max(BASE_FR, 0.01)))
+            logger.info("archetype_params_applied", direct_ratio=dr, hub_loop_ratio=hl,
+                       feeder_ratio=fr, trunk_ratio=arch_mix.get("trunk_ratio", 0.05))
+        else:
+            n_direct = 500
+            hub_loop_count = 10
+            feeder_count_target = 100
+
+        # ── A: Direct services for top-N high-demand corridors ─────────
         top_demands  = sorted(problem.demands, key=lambda d: d.weekly_teu, reverse=True)
-        top_n_direct = min(500, len(top_demands))
-        for d in top_demands[:top_n_direct]:
+        n_direct = min(n_direct, len(top_demands))
+        for d in top_demands[:n_direct]:
             if d.origin == d.destination:
                 continue
             # Match vessel capacity to demand (with 20% buffer for growth)
@@ -67,7 +93,7 @@ class ServiceGeneratorAgent(BaseAgent):
                 vessel_class=vessel_class
             ))
             sid += 1
-        logger.info("direct_services_added", count=top_n_direct)
+        logger.info("direct_services_added", count=n_direct)
 
         # ── B: Multi-port regional loop services via each hub ───────────
         # Each loop visits the hub + its top-N spoke ports.
@@ -287,7 +313,34 @@ class ServiceGeneratorAgent(BaseAgent):
                 f"Hub Ports: [{hub_ids_str}]"
             )
 
-        services         = self.generate_services(problem)
+        # ── Generate structured archetype params from LLM + validation ──
+        try:
+            json_prompt = prompt + (
+                "\n\nReturn ONLY valid JSON (no markdown, no preamble):\n"
+                '{"direct_ratio": <0.05-0.80>, "hub_loop_ratio": <0.05-0.80>, '
+                '"feeder_ratio": <0.05-0.80>, "trunk_ratio": <0.05-0.80>, '
+                '"vessel_bias": "small"|"balanced"|"large", '
+                '"hub_focus": ["PORT_ID", ...], '
+                '"notes": "<brief rationale>"}'
+            )
+            raw_json = self.call_llm(json_prompt, temperature=0.1)
+            import json as _json
+            import re as _re
+            text = raw_json.strip()
+            text = _re.sub(r"^```[a-zA-Z]*\n?", "", text)
+            text = _re.sub(r"\n?```$", "", text)
+            try:
+                parsed = _json.loads(text.strip())
+            except _json.JSONDecodeError:
+                m = _re.search(r"\{.*\}", text, _re.DOTALL)
+                parsed = _json.loads(m.group()) if m else {}
+            archetype_params = validate_archetype_params(parsed)
+            logger.info("archetype_params_generated", tag="AI_VALIDATED", params=archetype_params)
+        except Exception:
+            archetype_params = dict(DEFAULT_ARCHETYPE_PARAMS)
+            logger.info("archetype_params_generated", tag="AI_FALLBACK", reason="LLM parse failed, using defaults")
+
+        services         = self.generate_services(problem, archetype_params=archetype_params)
         problem.services = services
         logger.info("services_attached_to_problem", count=len(services))
 
@@ -296,4 +349,5 @@ class ServiceGeneratorAgent(BaseAgent):
             "strategy":           strategy,
             "services_generated": len(services),
             "services":           services,
+            "archetype_params":   archetype_params,
         }

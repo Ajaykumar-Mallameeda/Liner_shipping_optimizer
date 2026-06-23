@@ -14,6 +14,8 @@ from src.agents.coordinator_agent        import CoordinatorAgent
 from src.optimization.data               import Problem
 from src.utils.config                    import Config
 from src.utils.health_tracker            import health_tracker
+from src.validation.consensus_engine     import ConsensusEngine
+from src.utils.shared_context            import SharedContext, GlobalObjectives, RegionalPriority
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,9 @@ class OrchestratorAgent(BaseAgent):
             RegionalAgent("regional_africa",      "Africa",      Config.REGIONAL_MODEL),
         ]
         self.coordinator = CoordinatorAgent()
+        self.consensus_engine = ConsensusEngine()
+        self.shared_context = SharedContext()
+        self._previous_consensus = None
 
         # ── Iteration audit trail ──────────────────────────────────────────
         # Each entry: {iteration, before_coverage, before_profit, after_coverage,
@@ -206,21 +211,24 @@ class OrchestratorAgent(BaseAgent):
     # Feedback application 
     # ================================================================
 
-    def _apply_feedback(self, problem: Problem, decision_output: Dict) -> Problem:
+    def _apply_feedback(self, problem: Problem, decision_output: Dict,
+                         consensus_weights: Optional[Dict] = None) -> Problem:
         """
         Apply coordinator's gradient feedback to the Problem object so the
         next GA pass uses different weights.
 
         Priority order:
-          1. decision_output["decisions"]["weight_adjustments"]  (LLM-derived)
-          2. decision_output["feedback"]["weight_adjustments"]   (gradient-derived)
-          3. Simple heuristic based on coverage_gap
+          1. consensus_weights parameter (if provided)
+          2. decision_output["decisions"]["weight_adjustments"]  (LLM-derived)
+          3. decision_output["feedback"]["weight_adjustments"]   (gradient-derived)
+          4. Simple heuristic based on coverage_gap
         """
         feedback  = decision_output.get("feedback", {})
         decisions = decision_output.get("decisions", {})
 
-        # ── Get weight adjustments ─────────────────────────────────────────
+        # ── Get weight adjustments (consensus > decisions > feedback > heuristic) ──
         weights = (
+            consensus_weights or
             decisions.get("weight_adjustments") or
             feedback.get("weight_adjustments") or
             {}
@@ -563,6 +571,85 @@ class OrchestratorAgent(BaseAgent):
                 "resolution_log":     decision_output.get("resolution_log", []),
             })
 
+            # ── Consensus Engine reconciliation ────────────────────────────
+            try:
+                coord_weights = (
+                    decision_output.get("decisions", {}).get("weight_adjustments") or
+                    decision_output.get("feedback", {}).get("weight_adjustments") or
+                    {}
+                )
+                regional_policies = {}
+                for r in regional_results:
+                    region_key = r.get("region", "unknown").lower().replace(" ", "_")
+                    regional_policies[region_key] = {
+                        "coverage_priority": max(0.1, r.get("coverage_percent", 0) / 100.0),
+                        "profit_priority": max(0.1, 1.0 - (r.get("coverage_percent", 0) / 100.0)),
+                        "min_service_margin": max(0.01, r.get("profit_margin_pct", 5) / 100.0),
+                        "vessel_bias": "balanced",
+                        "hub_focus": [str(h) for h in r.get("hub_ports", [])[:3]],
+                    }
+                svc_archetype = {
+                    "archetype_mix": {"direct_ratio": 0.60, "hub_loop_ratio": 0.15,
+                                      "feeder_ratio": 0.20, "trunk_ratio": 0.05},
+                    "vessel_bias": "balanced", "hub_focus": [], "notes": "",
+                }
+                for r in regional_results:
+                    ap = r.get("archetype_params", {})
+                    if ap and isinstance(ap, dict):
+                        svc_archetype.update(ap)
+                        break
+
+                consensus_result = self.consensus_engine.process(
+                    coordinator_decisions=coord_weights,
+                    regional_policies=regional_policies,
+                    service_archetype_params=svc_archetype,
+                    previous_consensus=self._previous_consensus,
+                )
+                self._previous_consensus = consensus_result
+
+                consensus_weights = consensus_result.get("final_weight_adjustments", {})
+                if consensus_weights:
+                    problem.profit_weight = consensus_weights.get("profit_weight", problem.profit_weight)
+                    problem.coverage_weight = consensus_weights.get("coverage_weight", problem.coverage_weight)
+                    problem.cost_weight = consensus_weights.get("cost_weight", problem.cost_weight)
+                    logger.info("consensus_weights_applied", tag="CONSENSUS_APPLIED", weights=consensus_weights)
+            except Exception as ce_err:
+                logger.error("consensus_engine_failed", error=str(ce_err))
+
+            # ── Shared Context propagation ──────────────────────────────────
+            try:
+                region_ctx_priorities = {}
+                for r in regional_results:
+                    region_key = r.get("region", "unknown").lower().replace(" ", "_")
+                    region_ctx_priorities[region_key] = RegionalPriority(
+                        coverage_priority=max(0.1, r.get("coverage_percent", 0) / 100.0),
+                        profit_priority=max(0.1, 1.0 - (r.get("coverage_percent", 0) / 100.0)),
+                        hub_focus=[str(h) for h in r.get("hub_ports", [])[:3]],
+                        min_service_margin=max(0.01, r.get("profit_margin_pct", 5) / 100.0),
+                        vessel_bias="balanced",
+                        current_coverage=r.get("coverage_percent", 0),
+                        current_profit=r.get("weekly_profit", 0),
+                    )
+                self.shared_context = SharedContext(
+                    global_objectives=GlobalObjectives(
+                        profit_weight=getattr(problem, "profit_weight", 0.5),
+                        coverage_weight=getattr(problem, "coverage_weight", 0.4),
+                        cost_weight=getattr(problem, "cost_weight", 0.1),
+                        iteration=iteration,
+                        coverage_target=70.0,
+                        profit_floor=0.0,
+                        max_iterations=MAX_ITERATIONS,
+                        current_coverage=iter_coverage,
+                        current_profit=iter_profit,
+                        convergence_score=feedback.get("convergence_score", 0.0),
+                    ),
+                    regional_priorities=region_ctx_priorities,
+                )
+                self.shared_context.update_hub_strategy()
+                logger.info("shared_context_updated", tag="SHARED_CONTEXT_CREATED")
+            except Exception as sc_err:
+                logger.error("shared_context_failed", error=str(sc_err))
+
             # Send callback for iteration completion
             if self.callback:
                 self.callback("iteration_completed", {
@@ -610,7 +697,11 @@ class OrchestratorAgent(BaseAgent):
             prev_coverage = iter_coverage
 
             # ── APPLY FEEDBACK for next iteration ─────────────────────────
-            problem = self._apply_feedback(problem, decision_output)
+            consensus_wa = None
+            if self._previous_consensus:
+                consensus_wa = self._previous_consensus.get("final_weight_adjustments")
+            problem = self._apply_feedback(problem, decision_output,
+                                           consensus_weights=consensus_wa)
 
         # ── Final aggregation ──────────────────────────────────────────────
         logger.info("final_aggregation_started", regions=len(regional_results))
@@ -772,5 +863,7 @@ class OrchestratorAgent(BaseAgent):
             "iteration_audit":   self.iteration_audit,
             "iterations_run":    len(self.iteration_audit),
             "selected_services": all_selected_services,
-            "health_status":     health_tracker.get_health_status()
+            "health_status":     health_tracker.get_health_status(),
+            "consensus_result":  self._previous_consensus or {},
+            "shared_context":    self.shared_context.to_dict() if hasattr(self.shared_context, 'to_dict') else {},
         }

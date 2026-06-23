@@ -9,9 +9,13 @@ class Config:
     DATA_DIR = PROJECT_ROOT / "data"
     LOGS_DIR = PROJECT_ROOT/ "logs"
     
+    OPENCODE_API_KEY = os.getenv("OPENCODE_API_KEY")
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-    ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL","openrouter/gpt-oss-120b" )
-    REGIONAL_MODEL = os.getenv("REGIONAL_MODEL", "meta-llama/llama-3.1-8b-instruct")
+    # Primary LLM API key (OpenCode first, fallback to OpenRouter)
+    LLM_API_KEY = OPENCODE_API_KEY or OPENROUTER_API_KEY
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://opencode.ai/zen/v1")
+    ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "opencode/deepseek-v4-flash-free")
+    REGIONAL_MODEL = os.getenv("REGIONAL_MODEL", "opencode/deepseek-v4-flash-free")
     
     GA_POPULATION_SIZE = int(os.getenv("GA_POPULATION_SIZE", "80"))
     GA_GENERATIONS = int(os.getenv("GA_GENERATIONS", "120"))
@@ -20,15 +24,10 @@ class Config:
     @classmethod
     def validate(cls):
 
-        if not cls.OPENROUTER_API_KEY:
+        if not cls.LLM_API_KEY:
             raise ValueError(
-                "OPENROUTER_API_KEY not found!\n"
-                "Please set it in your .env file"
-            )
-
-        if not cls.OPENROUTER_API_KEY.startswith("sk-or-"):
-            raise ValueError(
-                "Invalid OPENROUTER_API_KEY format"
+                "No LLM API key found!\n"
+                "Set OPENCODE_API_KEY in your .env file"
             )
 
         cls.DATA_DIR.mkdir(exist_ok=True)

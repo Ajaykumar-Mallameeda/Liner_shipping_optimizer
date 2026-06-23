@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from src.agents.base   import BaseAgent
 from src.utils.config  import Config
 from src.utils.logger  import logger
+from src.validation.weight_validator import validate_weight_adjustments
 
 
 # ── Thresholds (tunable) ─────────────────────────────────────────────────
@@ -352,6 +353,20 @@ Return ONLY valid JSON (no markdown, no preamble):
         raw = self.call_llm(prompt, temperature=0.1)
         decisions = self._parse_json_safe(raw)
 
+        # ── Validate weight_adjustments through runtime validator ──────────
+        if decisions and "weight_adjustments" in decisions:
+            validated = validate_weight_adjustments(
+                decisions["weight_adjustments"],
+                iteration=0,
+                source="coordinator_llm",
+            )
+            decisions["weight_adjustments"] = validated
+            logger.info(
+                "coordinator_weight_validated",
+                tag="AI_VALIDATED",
+                weights=validated,
+            )
+
         if not decisions or "actions" not in decisions:
             # Rule-based fallback — always machine-usable
             actions = []
@@ -389,6 +404,18 @@ Return ONLY valid JSON (no markdown, no preamble):
                     f"{len(conflicts)} conflicts."
                 ),
             }
+
+        # Validate fallback weights too
+        decisions["weight_adjustments"] = validate_weight_adjustments(
+            decisions["weight_adjustments"],
+            iteration=0,
+            source="rule-based",
+        )
+        logger.info(
+            "coordinator_weight_validated",
+            tag="AI_FALLBACK",
+            weights=decisions["weight_adjustments"],
+        )
 
         return decisions
 

@@ -11,13 +11,22 @@ class LLMClient:
 
     def __init__(self):
         self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=Config.OPENROUTER_API_KEY
+            base_url=Config.LLM_BASE_URL,
+            api_key=Config.LLM_API_KEY
         )
+
+        # OpenCode fallback model chain (different architectures for diversity)
+        self.fallback_models = [
+            "qwen3.6-plus-free",
+            "minimax-m3-free",
+            "mimo-v2.5-free",
+            "nemotron-3-ultra-free",
+        ]
 
         self.cache = {}
         self.total_calls = 0
         self.cache_hits = 0
+        self.fallback_uses = 0
 
         # Circuit breaker state
         self.failure_count = 0
@@ -26,6 +35,33 @@ class LLMClient:
         self.circuit_breaker_timeout = 60   # seconds to wait before retry
         self.max_retries = 2
         self.retry_delay = 1.0  # seconds
+
+    def _try_call(self, model: str, system: str, user_message: str,
+                  temperature: float, max_tokens: int):
+        """Single model call with retries. Returns response or raises."""
+        last_err = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                if attempt > 0:
+                    logger.info("llm_retry", attempt=attempt, model=model)
+                    time.sleep(self.retry_delay * attempt)
+                logger.info("llm_calling", model=model, attempt=attempt, base_url=Config.LLM_BASE_URL)
+                return self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=30,
+                )
+            except Exception as e:
+                last_err = e
+                logger.warning("llm_attempt_failed",
+                               error=str(e)[:200],
+                               attempt=attempt, model=model)
+        raise last_err
 
     def _is_circuit_open(self) -> bool:
         """Check if circuit breaker is open"""
@@ -38,6 +74,11 @@ class LLMClient:
             return False
 
         return True
+
+    @staticmethod
+    def _strip_model(model: str) -> str:
+        """Strip provider prefix (e.g. opencode/deepseek -> deepseek)."""
+        return model.split("/", 1)[-1] if "/" in model else model
 
     def _get_hard_fallback_response(self) -> str:
         """Generate a sensible fallback response based on context"""
@@ -74,83 +115,40 @@ class LLMClient:
                           model=model)
             return self._get_hard_fallback_response()
 
+        # ----------------------------------------
+        # Try the requested model, then walk fallback allowlist.
+        # Strip provider prefix (e.g. "opencode/deepseek..." -> "deepseek...")
+        # OpenCode uses plain model slugs without provider prefix.
+        # ----------------------------------------
+        stripped = self._strip_model(model)
+        candidates = [stripped] + [m for m in self.fallback_models if m != stripped]
         response = None
         last_exception = None
 
-        # ----------------------------------------
-        # Primary model call with retries
-        # ----------------------------------------
-        for attempt in range(self.max_retries + 1):
+        for idx, candidate in enumerate(candidates):
             try:
-                if attempt > 0:
-                    logger.info("llm_retry", attempt=attempt, model=model)
-                    time.sleep(self.retry_delay * attempt)
-
-                logger.info("llm_calling", model=model, attempt=attempt)
-
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user_message}
-                    ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=30  # Add timeout
+                response = self._try_call(
+                    candidate, system, user_message,
+                    temperature, max_tokens,
                 )
-                # Reset failure count on success
+                if idx > 0:
+                    self.fallback_uses += 1
+                    logger.info("llm_fallback_used",
+                                requested=model, used=candidate)
                 self.failure_count = 0
-                break  # Success, break retry loop
-
+                break
             except Exception as e:
                 last_exception = e
-                logger.warning("llm_primary_failed",
-                             error=str(e),
-                             attempt=attempt,
-                             model=model)
+                self.failure_count += 1
+                self.last_failure_time = time.time()
+                logger.warning("llm_candidate_failed",
+                               candidate=candidate, error=str(e)[:200])
 
-                if attempt == self.max_retries:
-                    self.failure_count += 1
-                    self.last_failure_time = time.time()
-
-        # ----------------------------------------
-        # Fallback model if primary failed
-        # ----------------------------------------
         if response is None:
-            fallback_model = "meta-llama/llama-3-8b-instruct"
-
-            for attempt in range(self.max_retries + 1):
-                try:
-                    if attempt > 0:
-                        logger.info("llm_fallback_retry", attempt=attempt, model=fallback_model)
-                        time.sleep(self.retry_delay * attempt)
-
-                    logger.info("llm_fallback_call", model=fallback_model, attempt=attempt)
-
-                    response = self.client.chat.completions.create(
-                        model=fallback_model,
-                        messages=[
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user_message}
-                        ],
-                        temperature=0.2,
-                        max_tokens=max_tokens,
-                        timeout=30  # Add timeout
-                    )
-                    # Reset failure count on success
-                    self.failure_count = 0
-                    break  # Success, break retry loop
-
-                except Exception as e2:
-                    logger.error("llm_fallback_failed",
-                                error=str(e2),
-                                attempt=attempt,
-                                model=fallback_model)
-
-                    if attempt == self.max_retries:
-                        self.failure_count += 1
-                        self.last_failure_time = time.time()
-                        return self._get_hard_fallback_response()
+            logger.error("llm_all_candidates_failed",
+                         last_error=str(last_exception)[:200] if last_exception else "unknown",
+                         total_candidates=len(candidates))
+            return self._get_hard_fallback_response()
 
         # ----------------------------------------
         # 🔥 SAFE RESPONSE EXTRACTION (ALWAYS RUNS)

@@ -53,8 +53,8 @@ current_state = {
         "margin": 0,
         "unserved": 0,
         "convergence": 0,
-        "vesselsUtilized": 0,
-        "totalTeuMoved": 0
+        "vesselsUtilized": None,
+        "totalTeuMoved": None
     },
     "regions": {},
     "iterations": [],
@@ -78,9 +78,9 @@ def load_pipeline_data():
         # Load regional results
         regional_results = result.get("regional_results", [])
         current_state["regions"] = {
-            r.get("region", "").lower(): {
-                "id": r.get("region", "").lower(),
-                "name": r.get("region", ""),
+            r.get("region", "").lower().replace(" ", "_"): {
+                "id": r.get("region", "").lower().replace(" ", "_"),
+                "name": r.get("region", "").replace("Middle Last", "Middle East"),
                 "status": "completed",
                 "profit": r.get("weekly_profit", 0),
                 "coverage": r.get("coverage_percent", 0),
@@ -93,7 +93,9 @@ def load_pipeline_data():
                 "transship_cost": r.get("transship_cost", 0),
                 "generated": r.get("services_generated", 0),
                 "filtered": r.get("services_filtered", 0),
-                "selected": r.get("services_selected", 0)
+                "selected": r.get("services_selected", 0),
+                "strategy": r.get("strategy", ""),
+                "explanation": r.get("explanation", "")
             }
             for r in regional_results
         }
@@ -120,24 +122,35 @@ def load_pipeline_data():
         coverage = summary_metrics.get("coverage", 0)
         total_services = summary_metrics.get("total_services", 0)
 
+        status_val = result.get("status", "complete")
+        status_obj = {"status": status_val} if isinstance(status_val, str) else dict(status_val)
+        if "test_scorecard" in result:
+            status_obj.update(result["test_scorecard"])
+
         current_state["metrics"] = {
             "weeklyProfit": weekly_profit,
             "annualProfit": annual_profit,
             "totalCost": total_cost,
-            "operatingCost": total_cost,
+            "operatingCost": summary_metrics.get("operating_cost", total_cost),
             "totalServices": total_services,
             "coverage": coverage,
             "margin": (weekly_profit / (weekly_profit + total_cost)) * 100 if (weekly_profit + total_cost) > 0 else 0,
             "unserved": summary_metrics.get("unserved_demand", 0),
             "convergence": current_state["iterations"][-1]["score"] if current_state["iterations"] else 0.982,
             "runtime": summary_metrics.get("total_runtime", 0),
-            "vesselsUtilized": int(total_services * 0.8),
-            "totalTeuMoved": int(weekly_profit / 1000 * 2500) if weekly_profit > 0 else 0,
             "selected_services": result.get("selected_services", []),
             "decision_output": result.get("decision_output", {}),
             "executive_summary": result.get("executive_summary", ""),
-            "status": result.get("status", {})
+            "status": status_obj
         }
+
+        # Extract problem_stats from the dataset
+        problem_analysis_text = result.get("problem_analysis", "")
+        current_state["problem_stats"] = _parse_problem_stats(
+            problem_analysis_text,
+            summary_metrics,
+            result.get("selected_services", [])
+        )
 
         logger.info(f"Loaded pipeline data from {output_file}")
         return True
@@ -145,6 +158,37 @@ def load_pipeline_data():
     except Exception as e:
         logger.error(f"Error loading pipeline data: {e}")
         return False
+
+
+def _parse_problem_stats(analysis_text: str, metrics: dict, selected_services: list) -> dict:
+    """Parse real problem stats from the optimizer's problem_analysis text and summary_metrics."""
+    import re
+    ports = 0
+    lanes = 0
+    weekly_demand = 0
+
+    # Parse "333 ports x 9622 lanes" pattern
+    m = re.search(r'(\d+)\s*ports?\s*x\s*(\d+)\s*lanes?', analysis_text)
+    if m:
+        ports = int(m.group(1))
+        lanes = int(m.group(2))
+
+    # Parse "Total demand 1,666,738 TEU" pattern
+    m = re.search(r'[Tt]otal\s*demand\s*([\d,]+)\s*TEU', analysis_text)
+    if m:
+        weekly_demand = int(m.group(1).replace(',', ''))
+
+    # Fallback: use total_services as port count hint
+    total_services = metrics.get("total_services", 0)
+    if ports == 0 and total_services > 0:
+        ports = total_services  # not ideal but last resort
+
+    return {
+        "ports": ports,
+        "lanes": lanes,
+        "services": total_services,
+        "weekly_demand": weekly_demand
+    }
 
 # Load data on startup
 load_pipeline_data()
@@ -167,10 +211,10 @@ class ConnectionManager:
                 "regions": current_state["regions"],
                 "iterations": current_state["iterations"],
                 "problem_stats": current_state.get("problem_stats", {
-                    "ports": 435,
-                    "lanes": 9622,
-                    "services": 1200,
-                    "weekly_demand": 833484
+                    "ports": None,
+                    "lanes": None,
+                    "services": None,
+                    "weekly_demand": None
                 })
             }
         }))
@@ -392,8 +436,8 @@ async def run_actual_pipeline(connection_manager, config):
         for region_result in regional_results:
             # Convert to dashboard format
             region_data = {
-                "id": region_result.get("region", "").lower(),
-                "name": region_result.get("region", ""),
+                "id": region_result.get("region", "").lower().replace(" ", "_"),
+                "name": region_result.get("region", "").replace("Middle Last", "Middle East"),
                 "status": "completed",
                 "profit": region_result.get("weekly_profit", 0),
                 "coverage": region_result.get("coverage_percent", 0),
@@ -406,7 +450,9 @@ async def run_actual_pipeline(connection_manager, config):
                 "transship_cost": region_result.get("transship_cost", 0),
                 "generated": region_result.get("services_generated", 0),
                 "filtered": region_result.get("services_filtered", 0),
-                "selected": region_result.get("services_selected", 0)
+                "selected": region_result.get("services_selected", 0),
+                "strategy": region_result.get("strategy", ""),
+                "explanation": region_result.get("explanation", "")
             }
 
             # Update current state
@@ -420,9 +466,9 @@ async def run_actual_pipeline(connection_manager, config):
 
         # Update current state with real data
         current_state["regions"] = {
-            r.get("region", "").lower(): {
-                "id": r.get("region", "").lower(),
-                "name": r.get("region", ""),
+            r.get("region", "").lower().replace(" ", "_"): {
+                "id": r.get("region", "").lower().replace(" ", "_"),
+                "name": r.get("region", "").replace("Middle Last", "Middle East"),
                 "status": "completed",
                 "profit": r.get("weekly_profit", 0),
                 "coverage": r.get("coverage_percent", 0),
@@ -435,7 +481,9 @@ async def run_actual_pipeline(connection_manager, config):
                 "transship_cost": r.get("transship_cost", 0),
                 "generated": r.get("services_generated", 0),
                 "filtered": r.get("services_filtered", 0),
-                "selected": r.get("services_selected", 0)
+                "selected": r.get("services_selected", 0),
+                "strategy": r.get("strategy", ""),
+                "explanation": r.get("explanation", "")
             }
             for r in regional_results
         }
@@ -466,15 +514,13 @@ async def run_actual_pipeline(connection_manager, config):
             "weeklyProfit": weekly_profit,
             "annualProfit": annual_profit,
             "totalCost": total_cost,
-            "operatingCost": total_cost,
+            "operatingCost": summary_metrics.get("operating_cost", total_cost),
             "totalServices": total_services,
             "coverage": coverage,
             "margin": (weekly_profit / (weekly_profit + total_cost)) * 100 if (weekly_profit + total_cost) > 0 else 0,
             "unserved": summary_metrics.get("unserved_demand", 0),
             "convergence": current_state["iterations"][-1]["score"] if current_state["iterations"] else 0.982,
             "runtime": summary_metrics.get("total_runtime", 0),
-            "vesselsUtilized": int(total_services * 0.8),
-            "totalTeuMoved": int(weekly_profit / 1000 * 2500) if weekly_profit > 0 else 0,
             "selected_services": result.get("selected_services", []),
             "decision_output": result.get("decision_output", {}),
             "executive_summary": result.get("executive_summary", ""),

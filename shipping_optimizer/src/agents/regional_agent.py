@@ -10,6 +10,7 @@ from src.optimization.hierarchical_ga   import HierarchicalGA
 from src.optimization.hub_milp          import HubMILP
 from src.services.hub_detector          import HubDetector
 from src.utils.fuel_cost                import map_capacity_to_vessel_class
+from src.validation.regional_policy_validator import validate_regional_policy, DEFAULT_REGIONAL_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,7 @@ class RegionalAgent(BaseAgent):
         svc_result = svc_agent.process({"problem": problem})
         services   = svc_result["services"]
         services_generated = len(services)
+        svc_archetype_params = svc_result.get("archetype_params", {})
 
         norm: List[Service] = []
         # Region-prefix ensures globally unique service IDs (e.g. asia_svc_001)
@@ -381,6 +383,65 @@ class RegionalAgent(BaseAgent):
 
         elapsed = time.perf_counter() - t0
 
+        # ── Regional policy validation ──────────────────────────────────
+        try:
+            derived = {}
+            hub_detector_local = HubDetector(problem)
+            detected = hub_detector_local.detect_hubs(top_k=5)
+            top_demands_reg = sorted(problem.demands, key=lambda d: d.weekly_teu, reverse=True)
+
+            num_lanes_reg = len(problem.demands)
+            density_val = num_lanes_reg / (max(1, len(problem.ports)) * (max(1, len(problem.ports) - 1) / 2)) * 100 if len(problem.ports) > 1 else 0
+            density_level = "very_dense" if density_val > 100 else "dense" if density_val > 50 else "moderate" if density_val > 20 else "sparse"
+
+            if density_level in ("very_dense", "dense"):
+                vessel_bias_val = "large"
+            elif density_level == "moderate":
+                vessel_bias_val = "balanced"
+            else:
+                vessel_bias_val = "small"
+
+            top3_teu_val = sum(d.weekly_teu for d in top_demands_reg[:3])
+            top3_share_val = top3_teu_val / max(1, total_demand) * 100 if total_demand else 0
+
+            if top3_share_val > 35:
+                cov_base, prof_base = 0.85, 0.15
+            elif top3_share_val > 15:
+                cov_base, prof_base = 0.65, 0.35
+            else:
+                cov_base, prof_base = 0.45, 0.55
+
+            if density_level in ("very_dense",):
+                cov_base = max(0.15, cov_base - 0.10)
+                prof_base = min(0.85, prof_base + 0.10)
+
+            margin_base = {"very_dense": 0.03, "dense": 0.05, "moderate": 0.08, "sparse": 0.10}.get(density_level, 0.05)
+            if profit_margin_pct < 10:
+                margin_base += 0.05
+
+            regional_policy_data = {
+                "coverage_priority": round(cov_base, 2),
+                "profit_priority": round(prof_base, 2),
+                "min_service_margin": round(min(0.30, margin_base), 2),
+                "vessel_bias": vessel_bias_val,
+                "hub_focus": [str(h) for h in detected_hubs[:3]],
+                "corridor_focus": [[str(top_demands_reg[0].origin), str(top_demands_reg[0].destination)]] if top_demands_reg else [],
+                "notes": f"Region {self.region}: dens={density_level}, top3={top3_share_val:.1f}%. Total demand {total_demand:,.0f} TEU/wk.",
+                "rationale": [
+                    f"density={density_level} -> vessel_bias={vessel_bias_val}",
+                    f"margin adjusted for {profit_margin_pct:.1f}% profit margin -> {min(0.30, margin_base):.2f}",
+                ],
+            }
+            validated_policy = validate_regional_policy(
+                regional_policy_data,
+                valid_port_ids={str(p.id) for p in problem.ports},
+                source="rule-based",
+            )
+            logger.info("regional_policy_validated", tag="AI_VALIDATED", region=self.region, policy=validated_policy)
+        except Exception as val_err:
+            validated_policy = dict(DEFAULT_REGIONAL_POLICY)
+            logger.info("regional_policy_validated", tag="AI_FALLBACK", region=self.region, error=str(val_err))
+
         return {
             "agent":               self.name,
             "region":              self.region,
@@ -404,6 +465,8 @@ class RegionalAgent(BaseAgent):
             "cost_per_service":    cost_per_service,
             "uncovered_teu":       uncovered_teu_abs,
             "hub_ports":           detected_hubs,
+            "archetype_params":    svc_archetype_params,
+            "regional_policy":     validated_policy,
             "strategy":            strategy,
             "explanation":         explanation,
             "selected_services":   all_selected_services,
