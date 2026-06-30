@@ -27,7 +27,22 @@ class BaseAgent(ABC):
     def call_llm(self, user_message: str, temperature: float = 0.2) -> str:
 
         system_prompt = self.get_system_prompt()
-        enhanced_user_message = user_message + "\n\nThink step by step. Follow the output format strictly."
+        # ⚡ Phase P+1E: Skip "Think step by step" for JSON-targeted prompts.
+        # The DeepSeek model returns content='' (empty string) when asked to
+        # both "think step by step" AND "return ONLY valid JSON" simultaneously.
+        # This causes 100% JSON parse failure -> fallback -> 0% AI influence.
+        has_json_instruction = "Return ONLY valid JSON" in user_message or "Return JSON" in user_message
+        if not has_json_instruction:
+            enhanced_user_message = user_message + "\n\nThink step by step. Follow the output format strictly."
+        else:
+            enhanced_user_message = user_message
+
+        # ⚡ Phase P+1E: Also skip evaluator for JSON-targeted prompts.
+        # The evaluator checks for "Strategy"/"Reason" keywords which JSON
+        # output never contains, causing false rejection -> hardcoded fallback.
+        # JSON prompts have their own validation downstream (weight_validator,
+        # archetype_validator) so the evaluator is redundant here.
+        skip_evaluator = has_json_instruction
 
         for attempt in range(2):
 
@@ -47,28 +62,33 @@ class BaseAgent(ABC):
 
                 response = response.strip()
 
-# 🔥 Evaluate response
-                scores = evaluator.evaluate(response)
-                llm_metrics.log(self.name, scores)
+                # ⚡ Phase P+1E: Skip evaluator for JSON-targeted prompts.
+                # The evaluator checks for "Strategy"/"Reason" keywords which
+                # JSON output never contains. JSON prompts have downstream
+                # validators (weight_validator, archetype_validator) that are
+                # more appropriate for structured output validation.
+                if not skip_evaluator:
+                    scores = evaluator.evaluate(response)
+                    llm_metrics.log(self.name, scores)
 
-                logger.info(
-                    "llm_evaluation",
-                    agent=self.name,
-                    scores=scores
-                )
-
-                # Auto-reject low-quality outputs
-                if scores["total_score"] < 0.5:
-                    logger.warning("llm_low_quality", agent=self.name)
-
-                    # P1 calibration: include 2+ digit numeric citations so
-                    # downstream strategy-quality assertions pass even when
-                    # the LLM fails. The regional_agent will further enrich.
-                    response = (
-                        "Strategy: C\n"
-                        "Reason 1: Balanced network design across 50+ ports\n"
-                        "Reason 2: Handles demand variability for 100+ lanes"
+                    logger.info(
+                        "llm_evaluation",
+                        agent=self.name,
+                        scores=scores
                     )
+
+                    # Auto-reject low-quality outputs
+                    if scores["total_score"] < 0.5:
+                        logger.warning("llm_low_quality", agent=self.name)
+
+                        # P1 calibration: include 2+ digit numeric citations so
+                        # downstream strategy-quality assertions pass even when
+                        # the LLM fails. The regional_agent will further enrich.
+                        response = (
+                            "Strategy: C\n"
+                            "Reason 1: Balanced network design across 50+ ports\n"
+                            "Reason 2: Handles demand variability for 100+ lanes"
+                        )
 
                 return response
             

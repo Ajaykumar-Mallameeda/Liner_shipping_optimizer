@@ -17,6 +17,13 @@ class ServiceGeneratorAgent(BaseAgent):
 
     def __init__(self, name: str, model: str):
         super().__init__(name=name, role="Shipping Service Generator", model=model)
+        # ⚡ Phase P+1C: Runtime measurement counters
+        self._metrics = {
+            "llm_calls": 0,
+            "json_parse_success": 0,
+            "validator_executed": 0,
+            "fallback_count": 0,
+        }
 
     def get_system_prompt(self) -> str:
         return (
@@ -324,6 +331,9 @@ class ServiceGeneratorAgent(BaseAgent):
                 '"notes": "<brief rationale>"}'
             )
             raw_json = self.call_llm(json_prompt, temperature=0.1)
+            self._metrics["llm_calls"] += 1
+            # ⚡ P+1E trace: log raw LLM response
+            logger.info("p1e_raw_svcgen", raw_len=len(raw_json), raw_preview=raw_json[:200])
             import json as _json
             import re as _re
             text = raw_json.strip()
@@ -331,13 +341,23 @@ class ServiceGeneratorAgent(BaseAgent):
             text = _re.sub(r"\n?```$", "", text)
             try:
                 parsed = _json.loads(text.strip())
+                self._metrics["json_parse_success"] += 1
             except _json.JSONDecodeError:
                 m = _re.search(r"\{.*\}", text, _re.DOTALL)
                 parsed = _json.loads(m.group()) if m else {}
+                if parsed:
+                    self._metrics["json_parse_success"] += 1
+            # ⚡ Phase P+1C: Track whether parsing succeeded for correct log tag.
+            # Previously always logged "AI_VALIDATED" even when the validator
+            # internally fell back to defaults — creating contradictory audit trail.
+            parse_succeeded = bool(parsed)
             archetype_params = validate_archetype_params(parsed)
-            logger.info("archetype_params_generated", tag="AI_VALIDATED", params=archetype_params)
+            self._metrics["validator_executed"] += 1
+            tag = "AI_FALLBACK" if not parse_succeeded else "AI_VALIDATED"
+            logger.info("archetype_params_generated", tag=tag, params=archetype_params, parse_ok=parse_succeeded)
         except Exception:
             archetype_params = dict(DEFAULT_ARCHETYPE_PARAMS)
+            self._metrics["fallback_count"] += 1
             logger.info("archetype_params_generated", tag="AI_FALLBACK", reason="LLM parse failed, using defaults")
 
         services         = self.generate_services(problem, archetype_params=archetype_params)
@@ -350,4 +370,5 @@ class ServiceGeneratorAgent(BaseAgent):
             "services_generated": len(services),
             "services":           services,
             "archetype_params":   archetype_params,
+            "llm_runtime_metrics": dict(self._metrics),
         }

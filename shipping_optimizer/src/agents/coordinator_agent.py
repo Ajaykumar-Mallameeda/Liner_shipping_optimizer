@@ -27,6 +27,14 @@ class CoordinatorAgent(BaseAgent):
             role="Global Decision Agent",
             model=model or Config.ORCHESTRATOR_MODEL,
         )
+        # ⚡ Phase P+1C: Runtime measurement counters
+        self._metrics = {
+            "llm_calls": 0,
+            "llm_success": 0,
+            "json_parse_success": 0,
+            "validator_executed": 0,
+            "fallback_count": 0,
+        }
 
     def get_system_prompt(self) -> str:
         return (
@@ -94,6 +102,7 @@ class CoordinatorAgent(BaseAgent):
             "resolution_log":  resolution_log,
             "decisions":       decisions,
             "feedback":        feedback,
+            "llm_runtime_metrics": dict(self._metrics),
         }
 
     # ================================================================
@@ -117,7 +126,19 @@ class CoordinatorAgent(BaseAgent):
             services = chrom.get("services", [])
 
             if not services:
-                continue
+                # Fallback: detect from selected_services (regional agent format)
+                # ════════════════════════════════════════════════════════════
+                # Phase U7: The regional agent returns selected_services as
+                # a list of dicts (not a chromosome dict).  When chromosome
+                # is absent, read service IDs directly from selected_services
+                # so conflict detection works with both GA chromosome format
+                # and regional-agent result format.
+                services = [
+                    s.get("id") for s in solution.get("selected_services", [])
+                    if s.get("id") is not None
+                ]
+                if not services:
+                    continue
             # Detect format
             if isinstance(services[0], int):
                 # Format A: binary list
@@ -186,7 +207,13 @@ class CoordinatorAgent(BaseAgent):
                 svcs  = chrom.get("services", [])
 
                 if not svcs:
-                    continue
+                    # Phase U7: fallback to selected_services IDs
+                    svcs = [
+                        s.get("id") for s in sol.get("selected_services", [])
+                        if s.get("id") is not None
+                    ]
+                    if not svcs:
+                        continue
 
                 if isinstance(svcs[0], int):
                     # Binary format: zero out the flag
@@ -321,7 +348,7 @@ class CoordinatorAgent(BaseAgent):
         )
 
         prompt = f"""
-Global shipping network decision — iteration results:
+Global shipping network decision — iteration {iteration} results:
 
 Metrics:
   Total profit   : ${metrics['total_profit']:,.0f}/week
@@ -351,10 +378,18 @@ Return ONLY valid JSON (no markdown, no preamble):
 }}
 """
         raw = self.call_llm(prompt, temperature=0.1)
+        self._metrics["llm_calls"] += 1
+        # ⚡ P+1E trace: log raw LLM response
+        logger.info("p1e_raw_coord", raw_len=len(raw), raw_preview=raw[:200])
         decisions = self._parse_json_safe(raw)
 
+        # ⚡ Phase P+1C: Track parse result
+        if decisions:
+            self._metrics["json_parse_success"] += 1
+
         # ── Validate weight_adjustments through runtime validator ──────────
-        if decisions and "weight_adjustments" in decisions:
+        if decisions is not None and "weight_adjustments" in decisions:
+            self._metrics["validator_executed"] += 1
             validated = validate_weight_adjustments(
                 decisions["weight_adjustments"],
                 iteration=0,
@@ -368,6 +403,7 @@ Return ONLY valid JSON (no markdown, no preamble):
             )
 
         if not decisions or "actions" not in decisions:
+            self._metrics["fallback_count"] += 1
             # Rule-based fallback — always machine-usable
             actions = []
             if metrics["average_coverage"] < COVERAGE_TARGET:

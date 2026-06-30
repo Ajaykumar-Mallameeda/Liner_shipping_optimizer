@@ -3926,7 +3926,7 @@ def run_truth_certification(result: Dict, problem: Problem):
                 "T0.3 Influence Audit", "T0.4 Shared Context",
                 "T0.5 Coordination Audit", "T0.6 Dead Output Detector",
                 "T0.7 Truth Scorecard", "T0.8 System Truth Report"]:
-        print(f"    {C.GREEN}✓{C.RESET}  {sec}")
+        print(f"    {C.GREEN}+{C.RESET}  {sec}")
     print(f"  {sep()}")
     print(f"  {C.BOLD}SYSTEM_TRUTH_REPORT.md — GENERATED{C.RESET}")
 

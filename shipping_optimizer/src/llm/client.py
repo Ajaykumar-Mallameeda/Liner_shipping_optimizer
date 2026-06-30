@@ -15,12 +15,15 @@ class LLMClient:
             api_key=Config.LLM_API_KEY
         )
 
-        # OpenCode fallback model chain (different architectures for diversity)
+        # ⚡ Phase P+1F: Reordered — operational models first.
+        # qwen3.6-plus-free and minimax-m3-free have expired free promos
+        # (return 401 errors since 2026-06). mimo-v2.5-free is fast and
+        # operational. nemotron is operational but very slow (50s+).
         self.fallback_models = [
-            "qwen3.6-plus-free",
-            "minimax-m3-free",
-            "mimo-v2.5-free",
-            "nemotron-3-ultra-free",
+            "mimo-v2.5-free",          # operational, fast (~1s)
+            "nemotron-3-ultra-free",   # operational, slow (~50s)
+            "qwen3.6-plus-free",       # expired promo (401)
+            "minimax-m3-free",         # expired promo (401)
         ]
 
         self.cache = {}
@@ -54,7 +57,11 @@ class LLMClient:
                     ],
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    timeout=30,
+                    # ⚡ Phase P+1F: Increased from 30s to 60s.
+                    # The service gen JSON prompt intermittently takes >30s
+                    # on the OpenCode free-tier API, returning empty content
+                    # when the server-side generation is interrupted.
+                    timeout=60,
                 )
             except Exception as e:
                 last_err = e
@@ -83,6 +90,49 @@ class LLMClient:
     def _get_hard_fallback_response(self) -> str:
         """Generate a sensible fallback response based on context"""
         return "Service temporarily unavailable. Using default optimization parameters."
+
+    @staticmethod
+    def _extract_response_content(response) -> str:
+        """Extract usable content from an LLM response.
+
+        Returns the content string, or None if the response is reasoning-only
+        (content='' with reasoning_content populated) and should trigger a
+        fallback model retry.
+        """
+        try:
+            if response and response.choices:
+                message = response.choices[0].message
+
+                # ── Content present (even if empty string) ──────────────
+                if hasattr(message, "content") and message.content is not None:
+                    # Return empty string or actual content — both are valid
+                    return message.content or ""
+
+                # ── Tool calls (structured output) ──────────────────────
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    return str(message.tool_calls)
+
+                # ── Reasoning only (content='' but reasoning_content set) ─
+                # The OpenCode free-tier models sometimes return content=''
+                # with reasoning_content populated, particularly when the
+                # model's generation exceeds the API's internal time limit
+                # (observed: latency > 20s correlates with empty content).
+                # Return None to trigger the candidate loop to try the next
+                # fallback model, which may return proper content.
+                if hasattr(message, "reasoning_content") and message.reasoning_content:
+                    logger.warning(
+                        "llm_only_reasoning",
+                        reasoning=message.reasoning_content[:200],
+                    )
+                    return None  # Try next candidate
+
+                # ── No usable content at all ─────────────────────────────
+                return None
+        except Exception as e:
+            logger.warning("llm_extract_failed", error=str(e))
+            return None
+
+        return None
 
     def chat(
         self,
@@ -119,11 +169,19 @@ class LLMClient:
         # Try the requested model, then walk fallback allowlist.
         # Strip provider prefix (e.g. "opencode/deepseek..." -> "deepseek...")
         # OpenCode uses plain model slugs without provider prefix.
+        #
+        # Phase P+1C: Response extraction is now integrated into the candidate
+        # loop. When a model returns reasoning-only content (content='' with
+        # reasoning_content populated), we treat it as a failure and try the
+        # next candidate model. Previously, the extraction was outside the loop
+        # and always accepted the first response — which silently produced
+        # non-JSON serialized objects for every JSON-prompt call.
         # ----------------------------------------
         stripped = self._strip_model(model)
         candidates = [stripped] + [m for m in self.fallback_models if m != stripped]
-        response = None
+        result = ""
         last_exception = None
+        used_fallback = False
 
         for idx, candidate in enumerate(candidates):
             try:
@@ -131,12 +189,25 @@ class LLMClient:
                     candidate, system, user_message,
                     temperature, max_tokens,
                 )
-                if idx > 0:
-                    self.fallback_uses += 1
-                    logger.info("llm_fallback_used",
-                                requested=model, used=candidate)
-                self.failure_count = 0
-                break
+                content = self._extract_response_content(response)
+                if content is not None:
+                    # Got usable content — accept this candidate
+                    result = content
+                    if idx > 0:
+                        used_fallback = True
+                        self.fallback_uses += 1
+                        logger.info("llm_fallback_used",
+                                    requested=model, used=candidate)
+                    self.failure_count = 0
+                    break
+                else:
+                    # Reasoning-only response — treat as candidate failure
+                    logger.warning(
+                        "llm_candidate_reasoning_only",
+                        candidate=candidate,
+                    )
+                    raise ValueError("reasoning_only_response")
+
             except Exception as e:
                 last_exception = e
                 self.failure_count += 1
@@ -144,38 +215,10 @@ class LLMClient:
                 logger.warning("llm_candidate_failed",
                                candidate=candidate, error=str(e)[:200])
 
-        if response is None:
+        if not result:
             logger.error("llm_all_candidates_failed",
                          last_error=str(last_exception)[:200] if last_exception else "unknown",
                          total_candidates=len(candidates))
-            return self._get_hard_fallback_response()
-
-        # ----------------------------------------
-        # 🔥 SAFE RESPONSE EXTRACTION (ALWAYS RUNS)
-        # ----------------------------------------
-        result = ""
-
-        try:
-            if response and response.choices:
-                message = response.choices[0].message
-
-                if hasattr(message, "content") and message.content:
-                    result = message.content
-
-                elif hasattr(message, "tool_calls") and message.tool_calls:
-                    result = str(message.tool_calls)
-
-                else:
-                    result = str(message)
-
-        except Exception as e:
-            logger.warning("llm_parse_failed", error=str(e))
-
-        # ----------------------------------------
-        # 🔥 HARD FALLBACK (NEVER RETURN NONE)
-        # ----------------------------------------
-        if not result or result.lower() == "none":
-            logger.warning("empty_llm_response")
             result = self._get_hard_fallback_response()
 
         # ----------------------------------------

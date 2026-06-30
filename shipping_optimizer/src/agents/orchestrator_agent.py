@@ -54,7 +54,7 @@ class OrchestratorAgent(BaseAgent):
             "You are the Master Orchestrator of a global liner shipping network "
             "optimization system built on a GA + MILP solver pipeline.\n\n"
             "Your output is used directly by a Decision Agent and reviewed by "
-            "academic supervisors. Every claim MUST be grounded in the numeric "
+            "pipeline operators and downstream consumers. Every claim MUST be grounded in the numeric "
             "data supplied. Do not generalise, hedge, or repeat the question. "
             "Produce concise, evidence-based analysis only."
         )
@@ -788,38 +788,33 @@ class OrchestratorAgent(BaseAgent):
             f"- [Name top unserved corridor (port IDs + TEU) and specific remediation]"
         )
 
-        try:
-            executive_summary = ""
-            for _ in range(2):
-                executive_summary = self.call_llm(summary_prompt, temperature=0.1)
-                if self._is_valid_summary(executive_summary):
-                    break
-        except Exception:
-            executive_summary = ""
-
-        if not self._is_valid_summary(executive_summary):
-            lowest = min(
-                (r for r in regional_results if "region" in r),
-                key=lambda r: r.get("coverage_percent", 100),
-                default={},
-            )
-            executive_summary = (
-                f"Verdict: {'Good' if profit_margin_pct > 20 else 'Moderate' if profit_margin_pct > 15 else 'Poor'}\n"
-                f"  Profit margin {profit_margin_pct}% with {coverage:.1f}% demand coverage.\n\n"
-                f"Strengths:\n"
-                f"- Weekly profit ${weekly_profit:,.0f} across {total_services} services "
-                f"(${profit_per_service:,.0f}/service/week).\n"
-                f"- Cost breakdown: operating ${operating_cost:,.0f}, transship "
-                f"${transship_cost:,.0f}, port ${port_cost:,.0f}/week.\n\n"
-                f"Weaknesses:\n"
-                f"- {uncovered_pct:.1f}% demand ({unserved_teu:,.0f} TEU/week) unserved.\n"
-                f"- Cost per service ${cost_per_service:,.0f}/week limits expansion.\n\n"
-                f"Priority Actions:\n"
-                f"- Expand {lowest.get('region', 'lowest-coverage region')} "
-                f"(currently {lowest.get('coverage_percent', 0):.1f}% coverage).\n"
-                f"- Route capacity to Port {top_demands[0].origin} -> Port "
-                f"{top_demands[0].destination} ({top_demands[0].weekly_teu:,.0f} TEU/week)."
-            )
+        # ── Deterministic executive summary (no LLM — Phase P+1C) ─────────
+        # Previous code called the LLM for a narrative summary, but the LLM
+        # response was unreliable (content='' → serialized object). This
+        # deterministic version is more accurate and never fails.
+        # ───────────────────────────────────────────────────────────────────
+        lowest = min(
+            (r for r in regional_results if "region" in r),
+            key=lambda r: r.get("coverage_percent", 100),
+            default={},
+        )
+        executive_summary = (
+            f"Verdict: {'Good' if profit_margin_pct > 20 else 'Moderate' if profit_margin_pct > 15 else 'Poor'}\n"
+            f"  Profit margin {profit_margin_pct}% with {coverage:.1f}% demand coverage.\n\n"
+            f"Strengths:\n"
+            f"- Weekly profit ${weekly_profit:,.0f} across {total_services} services "
+            f"(${profit_per_service:,.0f}/service/week).\n"
+            f"- Cost breakdown: operating ${operating_cost:,.0f}, transship "
+            f"${transship_cost:,.0f}, port ${port_cost:,.0f}/week.\n\n"
+            f"Weaknesses:\n"
+            f"- {uncovered_pct:.1f}% demand ({unserved_teu:,.0f} TEU/week) unserved.\n"
+            f"- Cost per service ${cost_per_service:,.0f}/week limits expansion.\n\n"
+            f"Priority Actions:\n"
+            f"- Expand {lowest.get('region', 'lowest-coverage region')} "
+            f"(currently {lowest.get('coverage_percent', 0):.1f}% coverage).\n"
+            f"- Route capacity to Port {top_demands[0].origin} -> Port "
+            f"{top_demands[0].destination} ({top_demands[0].weekly_teu:,.0f} TEU/week)."
+        )
 
         logger.info("orchestrator_complete")
 
@@ -852,6 +847,44 @@ class OrchestratorAgent(BaseAgent):
                 }
             })
 
+        # ⚡ Phase P+1C: Aggregate LLM runtime metrics
+        coordinator_metrics = decision_output.get("llm_runtime_metrics", {})
+        # Derive servicegen success from archetype_params across regions
+        svcgen_ai_count = 0
+        svcgen_total = 0
+        for r in regional_results:
+            ap = r.get("archetype_params", {})
+            arch_mix = ap.get("archetype_mix", {}) if isinstance(ap, dict) else {}
+            svcgen_total += 1
+            # Default archetype mix means fallback was used
+            is_default = (
+                arch_mix.get("direct_ratio") == 0.60 and
+                arch_mix.get("hub_loop_ratio") == 0.15 and
+                arch_mix.get("feeder_ratio") == 0.20 and
+                arch_mix.get("trunk_ratio") == 0.05
+            )
+            if not is_default:
+                svcgen_ai_count += 1
+
+        # Count coordinator LLM success: decisions with real actions
+        decisions = decision_output.get("decisions", {})
+        coord_ai = bool(
+            decisions.get("actions") and
+            "Rule-based fallback" not in decisions.get("notes", "")
+        )
+
+        llm_runtime_metrics = {
+            "llm_calls": coordinator_metrics.get("llm_calls", 0) + svcgen_total,
+            "coordinator_llm_calls": coordinator_metrics.get("llm_calls", 0),
+            "coordinator_json_parse_success": coordinator_metrics.get("json_parse_success", 0),
+            "coordinator_validator_executed": coordinator_metrics.get("validator_executed", 0),
+            "coordinator_fallback_count": coordinator_metrics.get("fallback_count", 0),
+            "coordinator_ai_generated": coord_ai,
+            "servicegen_regions": svcgen_total,
+            "servicegen_ai_count": svcgen_ai_count,
+            "servicegen_fallback_count": svcgen_total - svcgen_ai_count,
+        }
+
         return {
             "orchestrator":      self.name,
             "status":            "complete",
@@ -866,4 +899,5 @@ class OrchestratorAgent(BaseAgent):
             "health_status":     health_tracker.get_health_status(),
             "consensus_result":  self._previous_consensus or {},
             "shared_context":    self.shared_context.to_dict() if hasattr(self.shared_context, 'to_dict') else {},
+            "llm_runtime_metrics": llm_runtime_metrics,
         }
