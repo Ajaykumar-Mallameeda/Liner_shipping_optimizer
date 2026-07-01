@@ -170,3 +170,5 @@ ehthumbs.db
 *.tmp
 *.bak
 *.swp
+# Unwanted directories
+free-claude-code/

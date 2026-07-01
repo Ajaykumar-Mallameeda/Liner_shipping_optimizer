@@ -67,3 +67,6 @@ Thumbs.db
 .coverage
 htmlcov/
 coverage.xml
+
+# Unwanted directories
+free-claude-code/
