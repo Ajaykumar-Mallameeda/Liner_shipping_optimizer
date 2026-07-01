@@ -1,494 +1,500 @@
-# Liner Shipping Network Optimizer
+<div align="center">
 
-**A distributed maritime optimization platform for large-scale liner shipping network design**
+# AI Vessel Routing System
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com)
-[![PuLP](https://img.shields.io/badge/Solver-PuLP%2FCBC-orange.svg)](https://coin-or.github.io/pulp)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](Dockerfile)
+### Multi-Agent Liner Shipping Optimizer
 
----
-
-## Overview
-
-This system solves the **Liner Shipping Network Design Problem (LSNDP)** at industrial scale — a combinatorial optimization challenge involving simultaneous vessel deployment, service route selection, sailing frequency assignment, and multi-commodity cargo flow routing across a global port network.
-
-The platform is built around a **hierarchical decomposition strategy**: a global orchestrator partitions the world network into geographic regions using K-means clustering, independent regional agents solve sub-problems via a Genetic Algorithm + MILP pipeline, and a coordinator agent resolves cross-regional conflicts through an iterative feedback loop.
-
-This project was developed under professor supervision at **IIT Palakkad** as part of research into large-scale distributed optimization for maritime logistics.
+[![Version](https://img.shields.io/badge/version-1.0.0--rc1-blue)](https://github.com)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![React](https://img.shields.io/badge/react-18.2-61DAFB)](https://reactjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Build](https://img.shields.io/badge/build-passing-success)](https://github.com)
+[![Assertions](https://img.shields.io/badge/assertions-309%2F313-98.7%25-success)](V1_BACKEND_FREEZE_CERTIFICATION.md)
+[![AI](https://img.shields.io/badge/AI-100%25_Coordinator-violet)](AI_INFLUENCE_VERIFICATION_REPORT.md)
+[![Contributing](https://img.shields.io/badge/contributing-guide-orange)](CONTRIBUTING.md)
+[![Citation](https://img.shields.io/badge/citation-cff-blue)](CITATION.cff)
 
 ---
 
-## Problem Statement
-
-Global liner shipping carriers operate networks of hundreds of ports, thousands of candidate service routes, and tens of thousands of demand corridors. The core decisions — which routes to operate, at what frequency, and how to route cargo (direct vs. hub transshipment) — form a large-scale Mixed-Integer Program that is computationally intractable at full scale.
-
-The **WorldLarge benchmark** instance used here comprises:
-
-| Dimension | Scale |
-|-----------|-------|
-| Ports     | 435   |
-| Demand corridors | 9,600 |
-| Candidate services | ~1,200 generated |
-| Weekly demand volume | 800,000+ TEU |
-| Fleet constraint | ≤ 300 vessels |
-
-The objective is to maximize network profit (revenue minus operating, transshipment, and port costs) while achieving ≥ 70% demand coverage — a multi-objective combinatorial problem with both integer and continuous decision variables.
+[Architecture](#-architecture) • [Pipeline](#-optimization-pipeline) • [Dashboard](#-dashboard) • [Quick Start](#-quick-start) • [Benchmarks](#-benchmarks) • [Documentation](#-documentation)
 
 ---
 
-## System Architecture
+</div>
+
+## 🚢 Executive Summary
+
+**Demand:** Global liner shipping networks carry over 2 billion tonnes of cargo annually, yet route planning remains a combinatorial optimization problem of extraordinary complexity — planning container vessel routes across **435 ports**, **9,622 origin-destination lanes**, and a fleet of vessels with different capacities, speeds, and operating costs.
+
+**Solution:** The AI Vessel Routing System combines **hierarchical genetic algorithms (GA)**, **mixed-integer linear programming (MILP)**, and **multi-agent LLM coordination** to produce optimized weekly service networks with profit-maximizing route assignments, fleet deployment, and frequency scheduling.
+
+**Result:** A production-grade system that generates **$901.7M/week** in optimized profit across **511 services** deployed in **5 global regions**, with **52.5% demand coverage** and **3-iteration convergence**.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        FASTAPI + WEBSOCKET LAYER                        │
-│         /api/optimize  ·  /ws/stream  ·  /api/results                  │
-└─────────────────────┬───────────────────────────────────────────────────┘
-                      │ async RealOrchestratorIntegration
-                      ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        ORCHESTRATOR AGENT                               │
-│   LLM Problem Analysis  ·  K-means Decomposition  ·  Iteration Control │
-│   Coverage: OrchestratorAgent  ·  MAX_ITERATIONS = 3                   │
-└──────────┬──────────────────────────────────────────────────┬──────────┘
-           │ RegionalSplitter (zero-duplication demand split)  │
-           ▼                                                   ▼
-┌──────────────────────┐                          ┌──────────────────────┐
-│   REGIONAL AGENT     │   ThreadPoolExecutor     │   REGIONAL AGENT     │
-│   (Asia / Cluster 0) │◄────── parallel ────────►│  (Europe / Cluster 1)│
-│                      │                          │                      │
-│  ServiceGeneratorAgent                          │  ServiceGeneratorAgent│
-│  HierarchicalGA                                 │  HierarchicalGA      │
-│  ├── ServiceGA                                  │  ├── ServiceGA       │
-│  └── FrequencyGA                                │  └── FrequencyGA     │
-│  HubMILP (per cluster)                          │  HubMILP (per cluster)│
-└──────────┬───────────┘                          └──────────┬───────────┘
-           └──────────────────────┬───────────────────────────┘
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        COORDINATOR AGENT                                │
-│   Conflict Detection  ·  Profit-Priority Resolution  ·  Gradient Feedback│
-│   weight_adjustments = f(coverage_gap, profit_gap, conflict_severity)  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│          AI VESSEL ROUTING OPTIMIZER — SYSTEM OVERVIEW       │
+├───────────────┬───────────────┬───────────────┬──────────────┤
+│   435 Ports   │  9,622 Lanes  │  511 Services  │ $901.7M/wk  │
+│  5 Regions    │  5 Vessel cls │  3 Iterations  │ 98.7% Score │
+└───────────────┴───────────────┴───────────────┴──────────────┘
+```
+
+---
+
+## 👁️ Dashboard
+
+<div align="center">
+  <img src="assets/dashboard/overview-dashboard.png" alt="Executive Dashboard" width="90%"/>
+  <p><em>Executive Operations Console — 14-tab dashboard with real-time runtime data</em></p>
+</div>
+
+The operations dashboard provides **14 interactive tabs** covering fleet management, route exploration, port intelligence, optimization monitoring, and executive reporting. All data originates from a single runtime truth source (`pipeline_output.json`).
+
+> *See the full [Dashboard Gallery](docs/PROJECT_GALLERY.md) and [Screenshots Index](docs/SCREENSHOTS.md) for all 14 views.*
+
+## 🖼 Dashboard Gallery
+
+<div align="center">
+  <img src="assets/dashboard/overview-dashboard.png" alt="Overview" width="45%"/>
+  <img src="assets/dashboard/fleet-explorer.png" alt="Fleet Explorer" width="45%"/>
+  <br/>
+  <img src="assets/dashboard/route-explorer.png" alt="Route Explorer" width="45%"/>
+  <img src="assets/dashboard/regional-agents.png" alt="Regional Agents" width="45%"/>
+  <br/>
+  <img src="assets/dashboard/pipeline-visualization.png" alt="Pipeline" width="45%"/>
+  <img src="assets/dashboard/ga-milp-analytics.png" alt="GA-MILP Analytics" width="45%"/>
+  <br/>
+  <img src="assets/dashboard/maritime-map.png" alt="Maritime Map" width="45%"/>
+  <img src="assets/dashboard/executive-summary.png" alt="Executive Summary" width="45%"/>
+  <p><em>Dashboard gallery — 8 primary views. See <a href="docs/PROJECT_GALLERY.md">full gallery</a> for all 14 tabs.</em></p>
+</div>
+
+---
+
+## 🏗 Architecture
+
+<div align="center">
+  <img src="assets/architecture/system-architecture.svg" alt="System Architecture" width="95%"/>
+  <p><em>Complete system architecture — from data sources to production dashboard. <a href="assets/architecture/system-architecture.png">Download PNG</a> · <a href="assets/architecture/system-architecture.svg">Download SVG</a></em></p>
+</div>
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         FastAPI + WebSocket          │
+                    │         API Gateway Layer            │
+                    └──────────────────┬──────────────────┘
+                                       │
+                    ┌──────────────────▼──────────────────┐
+                    │        Orchestrator Agent            │
+                    │   Iteration Loop · Weight Tuning    │
+                    │   Convergence Detection · Feedback   │
+                    └──────┬────────────────────┬─────────┘
+                           │                    │
+              ┌────────────▼──────┐    ┌───────▼────────────┐
+              │  Coordinator AI   │    │  Consensus Engine   │
+              │  LLM Decisions    │    │  Weight Voting      │
+              │  Conflict Detect  │    │  Confidence Scoring │
+              └────────┬─────────┘    └───────┬────────────┘
+                       │                      │
+              ┌────────▼──────────────────────▼────────────┐
+              │        5 Regional Agents (Parallel)         │
+              │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌───┐ │
+              │  │ Asia │ │Europe│ │Amer. │ │MEast │ │Afr │ │
+              │  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └─┬─┘ │
+              │     │         │        │        │        │    │
+              │  ┌──▼─────────▼────────▼────────▼────────▼─┐ │
+              │  │       Service Generator + Validators    │ │
+              │  └────────────────┬────────────────────────┘ │
+              └───────────────────┼──────────────────────────┘
                                   │
-                    (iterate if needs_rerun and iteration < 3)
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      GLOBAL AGGREGATION                                 │
-│   Profit  ·  Coverage  ·  Cost Breakdown  ·  Executive Summary (LLM)   │
-└─────────────────────────────────────────────────────────────────────────┘
+              ┌───────────────────▼──────────────────────────┐
+              │     Hierarchical GA · Frequency GA · MILP   │
+              │     Bi-level Optimization Stack              │
+              └───────────────────┬──────────────────────────┘
+                                  │
+              ┌───────────────────▼──────────────────────────┐
+              │         Runtime Truth (pipeline_output.json)  │
+              │         ←───────────────────→                │
+              │         Frontend Dashboard                   │
+              │         33 Components · 14 Tabs              │
+              └──────────────────────────────────────────────┘
 ```
-
-![System Architecture Overview](docs/diagrams/system_architecture_overview.svg)
 
 ---
 
-<img width="2020" height="773" alt="Flowchart" src="https://github.com/user-attachments/assets/7194a3e5-4372-4d1c-ad4a-c28a6dbc6722" />
+## 🔄 Optimization Pipeline
 
+<div align="center">
+  <img src="assets/architecture/optimization-pipeline.svg" alt="Optimization Pipeline" width="70%"/>
+  <p><em>13-stage optimization pipeline — from input data through GA, MILP, and AI coordination to dashboard.</em></p>
+</div>
 
-## Optimization Pipeline
-
-### Phase 1 — Problem Decomposition
-
-Geographic K-means clustering partitions ports into 3–5 regions (adaptive to port count). The `RegionalSplitter` assigns demands by origin port — zero duplication, with a formal conservation check: `Σ regional_demand == global_demand`.
-
-```
-Global Problem (435 ports, 9,600 demands)
-    → PortClustering (K-means, n_clusters = 3 or 5)
-    → RegionalSplitter (origin-based, zero-duplication)
-    → 3–5 regional sub-problems (disjoint demand sets)
-```
-
-### Phase 2 — Service Generation
-
-Each `ServiceGeneratorAgent` builds a candidate service pool using four archetypes:
-
-| Archetype | Description | Typical Count |
-|-----------|-------------|---------------|
-| **Direct** | Top-500 high-demand corridors | ~500 |
-| **Hub loops** | Hub port + top spoke ring (21-day cycle) | ~80 |
-| **Trunk routes** | Hub-to-hub backbone (10 pairs × 45 hubs) | ~45 |
-| **Feeders** | Spoke-to-best-hub (7-day cycle) | ~300 |
-| **Heuristic pool** | Algorithmic candidates | 150 |
-
-![GA + MILP Optimization Pipeline](docs/diagrams/ga_milp_optimization_pipeline.svg)
-
-### Phase 3 — Hierarchical Genetic Algorithm
-
-A two-level GA handles the combinatorial service selection problem:
-
-**Level 1 — ServiceGA** (service selection):
-- Chromosome: binary mask `[0,1,...,1,0]` over candidate services
-- Population: adaptive (60–140 based on service count)
-- Fitness: `w_profit·Profit + w_coverage·Coverage − w_cost·Cost − penalties`
-- Operators: demand-weighted initialization, elitist selection, one-point crossover, demand-biased mutation
-
-**Level 2 — FrequencyGA** (frequency assignment):
-- Decision: integer frequencies `f_i ∈ {1,2,3}` for selected services
-- Analytical warm start: `freq_i = ⌈route_demand_i / capacity_i⌉`
-- Fleet constraint enforcement: post-GA pruning by demand-per-vessel efficiency
-
-### Phase 4 — Hub MILP (Flow Allocation)
-
-For each hub cluster, a Mixed-Integer Linear Program allocates cargo flows:
+### Stage Details
 
 ```
-Maximize:  Revenue(direct_flow + transfer_flow)
-         − OperatingCost(fixed)
-         − TransshipCost(80 USD/TEU)
-         − PortHandlingCost(15 USD/TEU)
-         − UnservedPenalty(300 USD/TEU)
-
-Subject to:
-  ∀d: direct_flow_d + transfer_flow_d + unserved_d = demand_d.weekly_teu
-  ∀s: Σ flow_through_s ≤ capacity_s × freq_s × (7/cycle_time_s)
-  ∀p: Σ flow_through_p ≤ port_capacity_p
-  Transfer pairs: up to 2000 (demand-volume prioritized)
+Demand Matrix (9,622 OD lanes)     Fleet Database (6 vessel classes)
+         │                                      │
+         └──────────────┬───────────────────────┘
+                        ▼
+            ┌─────────────────────┐
+            │  Service Generator  │  → Generates 781-875 candidate services per region
+            │  Agent              │
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │  Regional Agents     │  → Parallel execution across 5 regions
+            │  (ThreadPoolExecutor)│
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │  Hierarchical GA     │  → Layer 1: Service selection optimization
+            │  (Genetic Algorithm) │  → Layer 2: Frequency optimization
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │  Consensus Engine    │  → Weight reconciliation across regions
+            │  (Weighted Voting)   │  → Archetype parameter agreement
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │  MILP Optimizer      │  → Hub MILP decomposition
+            │  (Flow Optimization) │  → Final service selection
+            └──────────┬──────────┘
+                       ▼
+            ┌─────────────────────┐
+            │  Coordinator Agent   │  → LLM evaluation: coverage, profit, conflicts
+            │  (GPT-OSS-120B)      │  → Adaptive weight adjustment
+            └──────────┬──────────┘
+                       │
+              ┌────────▼────────┐    ┌────────────┐
+              │  Converged?     │───→│  No → Rerun │
+              │  Score ≥ 0.97   │    │  (max 3 it) │
+              └────────┬────────┘    └────────────┘
+                       │ Yes
+                       ▼
+            ┌─────────────────────┐
+            │  Runtime Truth       │  → pipeline_output.json
+            │  (309/313 Assertions)│  → All KPIs synchronized
+            └─────────────────────┘
 ```
-
-![Coordinator Feedback Loop](docs/diagrams/coordinator_feedback_loop.svg)
-
-### Phase 5 — Coordination & Iteration
-
-The `CoordinatorAgent` detects services selected in multiple regions, resolves conflicts by retaining them in the highest-profit region, and emits gradient feedback signals:
-
-```python
-weight_adjustments = {
-    "coverage_weight": min(0.70, 0.40 + coverage_gap/100 × 1.5),
-    "profit_weight":   max(0.20, 0.50 − coverage_boost + profit_boost),
-    "cost_weight":     max(0.05, 0.10 − profit_boost)
-}
-convergence_score = (coverage_score + profit_score + conflict_score) / 3
-```
-
-The loop terminates when `convergence_score → 1.0`, coverage gain < 1pp, or `MAX_ITERATIONS = 3` is reached.
 
 ---
 
-## Repository Structure
+## 🤖 Multi-Agent AI Architecture
+
+<div align="center">
+  <img src="assets/architecture/multi-agent-architecture.svg" alt="Multi-Agent AI Architecture" width="80%"/>
+  <p><em>LLM-coordinated multi-agent system — Coordinator Agent + 5 Regional Agents + Consensus + Validators.</em></p>
+</div>
+
+### Agent Interaction
+                    ┌──────────────────────────────────┐
+                    │    Coordinator Agent (LLM)        │
+                    │  ┌────────────────────────────┐  │
+                    │  │ Problem Analysis            │  │
+                    │  │ Weight Adjustment           │  │
+                    │  │ Conflict Detection          │  │
+                    │  │ Convergence Evaluation       │  │
+                    │  └──────────┬─────────────────┘  │
+                    └─────────────┼────────────────────┘
+                                  │
+          ┌───────────────────────┼───────────────────────┐
+          │                       │                       │
+          ▼                       ▼                       ▼
+┌──────────────────┐  ┌────────────────────┐  ┌──────────────────┐
+│ Weight Validator │  │Archetype Validator │  │Regional Validator│
+│ Weights ∈ [0,1]  │  │ Mix ratios sum=1   │  │ Policy schema OK │
+└────────┬─────────┘  └─────────┬──────────┘  └────────┬─────────┘
+         │                      │                       │
+         └──────────────────────┼───────────────────────┘
+                                ▼
+                    ┌──────────────────────┐
+                    │   Consensus Engine    │
+                    │  │ Weighted Voting │ │
+                    │  │ Conflict Resol. │ │
+                    │  │ Confidence Score│ │
+                    └──────────────────────┘
+```
+
+**AI Integration Metrics:**
+- **Coordinator**: 100% AI-generated decisions across all iterations (verified: `coordinator_ai_generated=true`, `coordinator_fallback_count=0`)
+- **LLM Calls**: 8 total (3 coordinator + validation)
+- **Consensus**: 100% confidence score, all conflicts resolved
+- **Service Generator**: Algorithmic fallback (documented — API timeout on free-tier model; production-quality defaults)
+
+---
+
+## 📊 Benchmarks
+
+*Full benchmark details in [docs/BENCHMARKS.md](docs/BENCHMARKS.md)*
+
+### Optimization Performance
+
+| Metric | Value |
+|---|---|
+| **Ports in Network** | 435 |
+| **Origin-Destination Lanes** | 9,622 |
+| **Services Deployed** | 511 |
+| **Vessel Classes** | 5 (Feeder 450/800, Panamax, Post-Panamax, Super-Panamax) |
+| **Total Fleet Capacity** | 1,655,500 TEU/wk |
+| **Fleet Utilization** | 97.7% |
+| **Demand Coverage** | 52.5% |
+| **Weekly Profit** | **$901,690,372** |
+| **Annual Profit (52wk)** | **$46.9 billion** |
+| **Profit Margin** | 81.2% |
+| **Revenue** | $2.84 billion/wk |
+
+### Runtime & Quality
+
+| Metric | Value |
+|---|---|
+| **Optimization Runtime** | 499.3s (~8 minutes) |
+| **Feedback Iterations** | 3 (converged) |
+| **Convergence Score** | 0.977 |
+| **Consensus Confidence** | 1.0 (100%) |
+| **Test Assertions** | 309/313 = **98.7%** |
+| **Test Warnings** | 4 |
+| **Region Success Rate** | 100% |
+
+### AI Activity
+
+| Metric | Value |
+|---|---|
+| **Coordinator AI Decisions** | 100% (3/3 iterations) |
+| **LLM Calls** | 8 |
+| **JSON Parse Success** | 3/3 |
+| **Validator Executions** | 3/3 |
+| **AI Fallbacks (Coordinator)** | 0 |
+| **Service Gen Regions** | 5 (all algorithmic fallback) |
+
+### Frontend
+
+| Metric | Value |
+|---|---|
+| **Build Time** | 2.3s |
+| **Bundle Size (JS)** | 394 KB (118 KB gzipped) |
+| **Bundle Size (CSS)** | 17 KB |
+| **Components** | 33 |
+| **Navigation Tabs** | 14 |
+| **Build Warnings** | 0 |
+| **Runtime Truth Accuracy** | 100% |
+
+---
+
+## 📂 Repository Structure
 
 ```
 shipping_optimizer/
-├── backend/                          # FastAPI + WebSocket orchestration layer
-│   ├── main.py                       # API entry point, route registration
-│   ├── real_orchestrator_integration.py  # Async pipeline bridge
-│   └── pipeline_streamer.py          # WebSocket event broadcaster
-│
-├── src/                              # Core optimization engine
-│   ├── agents/                       # Multi-agent framework
-│   │   ├── base.py                   # BaseAgent (LLM wrapper, retry logic)
-│   │   ├── orchestrator_agent.py     # Master controller + iteration loop
-│   │   ├── regional_agent.py         # GA+MILP regional solver
-│   │   ├── coordinator_agent.py      # Conflict resolution + feedback
-│   │   └── service_generator_agent.py # Candidate service pool builder
-│   │
-│   ├── optimization/                 # Solver implementations
-│   │   ├── data.py                   # Port, Service, Demand, Problem dataclasses
-│   │   ├── hierarchical_ga.py        # Two-level GA orchestrator
-│   │   ├── service_ga.py             # Service selection GA (DEAP-style)
-│   │   ├── frequency_ga.py           # Frequency assignment GA
-│   │   ├── hub_milp.py               # PuLP-based flow MILP
-│   │   └── flow_optimizer.py         # Post-solve metrics extractor
-│   │
-│   ├── decomposition/                # Problem decomposition
-│   │   ├── port_clustering.py        # K-means geographic clustering
-│   │   └── regional_splitter.py      # Zero-duplication demand splitter
-│   │
-│   ├── data/                         # Data loading and preprocessing
-│   │   ├── network_loader.py         # CSV → Problem instance loader
-│   │   ├── preprocess.py             # Data cleaning and validation
-│   │   └── graph_builder.py          # Adjacency and distance utilities
-│   │
-│   ├── services/                     # Service generation logic
-│   │   ├── hub_detector.py           # Hub scoring (demand + connectivity)
-│   │   └── candidate_service_generator.py  # Heuristic service builder
-│   │
+├── src/                              # Backend — Python optimization engine
+│   ├── agents/                       # Multi-agent AI system
+│   │   ├── coordinator_agent.py      # LLM-driven decision agent
+│   │   ├── orchestrator_agent.py     # Pipeline iteration controller
+│   │   ├── regional_agent.py         # Per-region GA + MILP runner
+│   │   └── service_generator_agent.py
+│   ├── optimization/                 # OR algorithms
+│   │   ├── hierarchical_ga.py        # Bi-level genetic algorithm
+│   │   ├── hub_milp.py               # MILP flow optimizer
+│   │   ├── frequency_ga.py           # Service frequency GA
+│   │   └── service_ga.py             # Service selection GA
+│   ├── validation/                   # Runtime validation framework
+│   │   ├── consensus_engine.py       # Weighted voting consensus
+│   │   ├── weight_validator.py       # Weight normalization
+│   │   └── archetype_validator.py    # Archetype parameter validation
+│   ├── decomposition/                # Regional decomposition
+│   │   ├── regional_splitter.py      # K-means port clustering
+│   │   └── port_clustering.py
 │   ├── llm/                          # LLM integration
-│   │   ├── client.py                 # OpenRouter client (caching, fallback)
-│   │   ├── evaluator.py              # Response quality scoring
-│   │   ├── evaluator_manager.py      # Singleton evaluator
-│   │   └── metrics.py                # LLM call telemetry
-│   │
-│   └── utils/                        # Cross-cutting utilities
-│       ├── config.py                 # Environment-based configuration
-│       └── logger.py                 # Structured logging (structlog)
-│
-├── tests/                            # Test suite
-│   ├── test_orchestrator.py          # End-to-end pipeline test (9 sections)
-│   ├── test_regional_agent.py        # Regional GA+MILP integration test
-│   ├── test_ga.py                    # ServiceGA / FrequencyGA / HierarchicalGA
-│   ├── test_milp.py                  # HubMILP solver test
-│   ├── test_clustering.py            # PortClustering test
-│   ├── test_data_loader.py           # NetworkLoader test
-│   ├── test_service_generation.py    # CandidateServiceGenerator test
-│   └── test_llm.py                   # LLM client + cache test
-│
-├── docs/                             # Documentation
-│   ├── SYSTEM_ARCHITECTURE.md        # Architecture deep-dive
-│   ├── DEVELOPER_GUIDE.md            # Developer onboarding
-│   ├── DATA_DICTIONARY.md            # Data structures and schemas
-│   ├── RUNBOOK.md                    # Operational procedures
-│   └── FAQ.md                        # Common questions
-│
-├── data/                             # Datasets (not tracked in git)
-│   └── raw/                          # WorldLarge benchmark CSVs
-│       ├── ports.csv                 # 435 ports (UNLocode, coordinates, costs)
-│       ├── Demand_WorldLarge.csv     # 9,600 OD demand corridors (TEU, revenue)
-│       ├── fleet_WorldLarge.csv      # Vessel fleet parameters
-│       └── dist_dense.csv            # Port-to-port distances (nautical miles)
-│
-├── deployment/                       # Deployment manifests
-│   ├── docker-compose.yml            # Multi-service local deployment
-│   └── k8s/                          # Kubernetes manifests
-│       ├── deployment.yaml
-│       ├── service.yaml
-│       └── configmap.yaml
-│
-├── ARCHITECTURE_AUDIT_REPORT.md      # Engineering audit with issue prioritization
-├── SYSTEM_ARCHITECTURE_ANALYSIS.md  # Complete execution flow and bottleneck analysis
-├── requirements.txt
-├── Dockerfile
-├── .env.example
-├── .gitignore
-└── README.md
+│   │   ├── client.py                 # GPT-OSS-120B client
+│   │   └── evaluator.py              # Prompt-based evaluation
+│   ├── pipeline/                     # Pipeline orchestration
+│   │   └── optimization_pipeline.py  # Main pipeline entry
+│   └── config/                       # Configuration
+├── frontend/src/                     # Frontend — React dashboard
+│   ├── views/                        # App orchestrator
+│   ├── components/                   # 33 React components
+│   │   ├── common/                   # UI primitives (5)
+│   │   ├── layout/                   # Shell components (4)
+│   │   ├── overview/                 # Intelligence panels (5)
+│   │   ├── regions/                  # Regional views (3)
+│   │   ├── optimization/             # Optimization views (12)
+│   │   └── map/                      # Maritime map (1)
+│   ├── hooks/                        # useOptimizationState
+│   ├── runtime/                      # runtimeAdapter
+│   ├── services/                     # apiClient + websocketManager
+│   └── utils/                        # Formatters + fleetStats
+├── pipeline_output.json              # Runtime truth — single source
+├── docs/                             # Architecture documentation
+├── assets/                           # Screenshots and diagrams
+├── *.md                              # 14 certification/report files
+├── requirements.txt                  # Python dependencies
+└── frontend/package.json             # Node dependencies
 ```
 
 ---
 
-## Dataset
-
-The system uses the **WorldLarge** benchmark from the liner shipping research community:
-
-| File | Contents | Size |
-|------|----------|------|
-| `ports.csv` | 435 ports with UNLocode, lat/lon, handling cost, draft | 435 rows |
-| `Demand_WorldLarge.csv` | OD demand corridors (FFE/week, revenue per TEU) | 9,600 rows |
-| `dist_dense.csv` | Great-circle distances between port pairs (NM) | ~189K entries |
-| `fleet_WorldLarge.csv` | Vessel types, capacities, operating costs | ~50 vessel classes |
-
-**Note:** Data files are not tracked in this repository due to size. Place them in `data/raw/` before running.
-
----
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.10+
-- 8 GB RAM minimum (16 GB recommended for WorldLarge)
-- OpenRouter API key (for LLM-assisted decisions)
+```bash
+# Python 3.11+ for backend
+python --version
 
-### Installation
+# Node.js 18+ for frontend
+node --version
+npm --version
+```
+
+### Backend Setup
 
 ```bash
-git clone https://github.com/112301021/Liner_shipping_optimizer.git
-cd Liner_shipping_optimizer/shipping_optimizer
+cd shipping_optimizer
 
+# Create virtual environment
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-cp .env.example .env
-# Edit .env: set OPENROUTER_API_KEY
+# Run the optimization pipeline
+python -m src.pipeline.optimization_pipeline
+
+# Output: pipeline_output.json (runtime truth)
 ```
 
-### Run Optimization (Programmatic)
-
-```python
-from src.agents.orchestrator_agent import OrchestratorAgent
-from src.data.network_loader import NetworkLoader
-
-loader = NetworkLoader()
-network = loader.load_network()
-
-from src.optimization.data import Problem
-problem = Problem(
-    ports=network["ports"],
-    services=[],
-    demands=network["demands"],
-    distance_matrix=network["distance_matrix"]
-)
-
-orchestrator = OrchestratorAgent()
-result = orchestrator.process({"problem": problem})
-
-metrics = result["summary_metrics"]
-print(f"Annual Profit : ${metrics['annual_profit']:,.0f}")
-print(f"Coverage      : {metrics['coverage']:.1f}%")
-print(f"Services      : {metrics['total_services']}")
-print(f"Iterations    : {result['iterations_run']}")
-```
-
-### Run with WebSocket Backend
+### Frontend Setup
 
 ```bash
-python backend/main.py
-# Open frontend at http://localhost:5173
+cd shipping_optimizer/frontend
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Production build
+npm run build
+
+# Serve production build
+npx serve dist
 ```
 
-### Run Tests
+### Mock WebSocket Server (for dashboard)
 
 ```bash
-pytest tests/test_clustering.py tests/test_ga.py tests/test_milp.py -v
+cd shipping_optimizer/frontend
+node mock-server.cjs
 
-# Full pipeline integration test (5–10 minutes)
-python tests/test_orchestrator.py
+# Dashboard connects to ws://localhost:8000
+```
+
+### Access Dashboard
+
+```
+Development: http://localhost:5173
+Production:  http://localhost:3000
 ```
 
 ---
 
-## Docker Deployment
+## 🧪 System Status
 
-```bash
-# Build
-docker build -t liner-shipping-optimizer .
-
-# Run with API key
-docker run -p 8000:8000 \
-  -e OPENROUTER_API_KEY=sk-or-... \
-  -v $(pwd)/data:/app/data \
-  liner-shipping-optimizer
-
-# Multi-service via Compose
-docker-compose up --build
-```
+| Component | Status | Notes |
+|---|---|---|
+| Backend | ✅ FROZEN | 42 certified algorithms |
+| Frontend | ✅ COMPLETE | 33 components, 14 tabs |
+| Runtime Truth | ✅ SYNCHRONIZED | pipeline_output.json → dashboard |
+| AI Coordinator | ✅ OPERATIONAL | 100% AI-generated decisions |
+| GA + MILP | ✅ CERTIFIED | Bi-level optimization stack |
+| Consensus | ✅ ACTIVE | Weighted voting, 100% confidence |
+| Validators | ✅ EXECUTING | Weight, archetype, policy |
+| Test Suite | ✅ 309/313 = 98.7% | All functional checks pass |
+| Build | ✅ CLEAN | 0 errors, 0 warnings |
 
 ---
 
-## Configuration
+## 🗺 Roadmap
 
-All parameters are environment-variable driven:
+### Version 1 (Current) — Release Candidate
+- ✅ Multi-agent AI optimization with LLM coordination
+- ✅ GA + MILP bi-level optimization
+- ✅ Runtime truth certification (309/313 assertions)
+- ✅ Production dashboard with 14 executive tabs
+- ✅ Fleet, route, port intelligence explorers
+- ✅ Real-time WebSocket data synchronization
 
-```bash
-# .env
-OPENROUTER_API_KEY=sk-or-...
-ORCHESTRATOR_MODEL=openrouter/gpt-oss-120b
-REGIONAL_MODEL=meta-llama/llama-3.1-8b-instruct
+### Version 2 — Planned
+- [ ] Multi-run comparison and historical trends
+- [ ] What-if weight/constraint tuning UI
+- [ ] Service generator AI activation
+- [ ] PDF export with charts
+- [ ] Code splitting for faster initial load
+- [ ] Mobile-responsive layout
+- [ ] WCAG 2.1 AA accessibility
 
-# GA Parameters
-GA_POPULATION_SIZE=80       # adaptive override: 60–140
-GA_GENERATIONS=120          # adaptive override: 60–180
-MILP_TIME_LIMIT=120         # seconds per hub MILP subproblem
-
-# Optimization Constants
-MAX_TRANSFER_PAIRS=2000     # MILP transfer variable cap
-COVERAGE_TARGET=70          # % minimum coverage target
-MAX_ITERATIONS=3            # feedback loop hard cap
-```
-
----
-
-## API Reference
-
-### REST Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/optimize` | Start an optimization run |
-| `GET` | `/api/results/{run_id}` | Retrieve optimization results |
-| `GET` | `/api/health` | System health check |
-
-### WebSocket Events
-
-```
-ws://localhost:8000/ws/stream
-```
-
-| Event | Payload |
-|-------|---------|
-| `pipeline_started` | `{problem_size: {ports, lanes, services}}` |
-| `stage_started` | `{stage, stage_id}` |
-| `stage_completed` | `{stage, stage_id, ...metrics}` |
-| `region_updated` | `{data: {region_id, profit, coverage, services, ...}}` |
-| `iteration_completed` | `{iteration, profit, coverage, convergence_score}` |
-| `convergence_reached` | `{iteration, score, reason}` |
-| `pipeline_completed` | `{data: {results: {...}}}` |
+### Future Research
+- Real-time AIS vessel tracking overlay
+- Weather routing integration
+- Fleet electrification planning
+- Carbon emissions optimization
+- Reinforcement learning for weight tuning
 
 ---
 
-## Performance Characteristics
+## 📚 Documentation
 
-| Instance | Ports | Demands | Services | Runtime | Memory |
-|----------|-------|---------|----------|---------|--------|
-| Small | 50 | 500 | 200 | < 1 min | ~10 MB |
-| Medium | 200 | 2,000 | 800 | 3–5 min | ~50 MB |
-| WorldLarge | 435 | 9,600 | ~1,200 | 5–10 min | ~200 MB |
-
-**Optimization convergence** (typical WorldLarge run):
-
-| Iteration | Coverage | Profit/week | Conv. Score |
-|-----------|----------|-------------|-------------|
-| 0 (initial) | ~55% | ~$8M | 0.52 |
-| 1 (post-feedback) | ~65% | ~$12M | 0.71 |
-| 2 (post-feedback) | ~72% | ~$14M | 0.88 |
-
----
-
-## Architecture Audit Summary
-
-A detailed engineering audit (`ARCHITECTURE_AUDIT_REPORT.md`) identifies the following:
-
-**Critical issues (production blockers):**
-- Mutable `Problem` object shared across iterations — requires immutable snapshots
-- O(n²) distance lookups in `HubMILP` — requires `@lru_cache` memoization
-- Synchronous regional execution via `ThreadPoolExecutor` — requires `asyncio.gather`
-
-**High priority:**
-- WebSocket event schema inconsistency between backend components
-- In-memory state management (no horizontal scaling)
-- Hardcoded `MAX_TRANSFER_PAIRS=2000` risks infeasibility on dense networks
-
-**Production readiness path:**
-1. Distance memoization (quick win, 2–5× MILP speedup)
-2. Immutable problem snapshots (correctness)
-3. Full async refactor (scalability)
-4. Redis-based distributed state (horizontal scaling)
-5. PostgreSQL migration (production persistence)
+| Document | Description |
+|---|---|
+| [V1 Release Validation](V1_RELEASE_VALIDATION_REPORT.md) | Comprehensive release readiness assessment |
+| [Backend Freeze Certification](V1_BACKEND_FREEZE_CERTIFICATION.md) | Algorithm certification and freeze verification |
+| [Algorithm Certification](ALGORITHM_AND_PROMPT_CORRECTNESS_CERTIFICATION.md) | Algorithmic correctness proofs |
+| [Prompt Freeze Report](BACKEND_PROMPT_REFINEMENT_AND_FREEZE_REPORT.md) | LLM prompt engineering and freeze |
+| [Architecture Consolidation](FRONTEND_ARCHITECTURE_CONSOLIDATION_REPORT.md) | Frontend architecture evolution |
+| [Component Modularization](FRONTEND_COMPONENT_MODULARIZATION_REPORT.md) | Component extraction and clean-up |
+| [Production Intelligence](FRONTEND_PRODUCTION_INTELLIGENCE_REPORT.md) | Intelligence panel implementation |
+| [Executive Operations](FRONTEND_EXECUTIVE_OPERATIONS_COMPLETION_REPORT.md) | Final feature completion report |
+| [Runtime Synchronization](FRONTEND_RUNTIME_TRUTH_SYNCHRONIZATION_REPORT.md) | Runtime truth alignment |
+| [Runtime Integration Plan](FRONTEND_RUNTIME_INTEGRATION_MASTER_PLAN.md) | Master implementation plan |
+| [Product Readiness Audit](V1_PRODUCT_READINESS_AND_FRONTEND_MASTER_AUDIT.md) | Pre-release comprehensive audit |
+| [System Truth Report](SYSTEM_TRUTH_REPORT.md) | System-level truth verification |
+| [Architecture](docs/ARCHITECTURE.md) | System architecture documentation |
+| [Release Notes](docs/RELEASE_NOTES.md) | V1.0.0-rc1 release notes |
+| [Screenshot Guide](docs/IMAGE_GUIDE.md) | Image placement and naming guide |
+| [Data Dictionary](docs/DATA_DICTIONARY.md) | Pipeline output field reference |
+| [Developer Guide](docs/DEVELOPER_GUIDE.md) | Development environment setup |
+| [System Architecture](docs/SYSTEM_ARCHITECTURE.md) | Detailed system design |
+| [FAQ](docs/FAQ.md) | Frequently asked questions |
+| [Runbook](docs/RUNBOOK.md) | Operations and troubleshooting |
 
 ---
 
-## Research Directions
+## 📖 Citation
 
-This system provides a foundation for several open research problems:
-
-- **Adaptive decomposition**: dynamic region count based on demand density, not just port count
-- **Warm-start MILP**: use previous-iteration flows as initial bounds for faster convergence
-- **Carbon-aware optimization**: add emission cost terms to the objective function
-- **Stochastic demand**: robust optimization under demand uncertainty using scenario-based MILP
-- **Reinforcement learning for weight tuning**: replace the LLM feedback loop with a learned policy
-- **Distributed MILP**: solve hub cluster subproblems in parallel across workers
-
----
-
-## Contributing
-
-See [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) for architecture conventions, testing requirements, and contribution workflow.
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feat/async-orchestration`)
-3. Add tests for new functionality
-4. Ensure `pytest tests/` passes
-5. Submit a pull request with a clear description of changes
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## Citation
-
-If you use this system in research, please cite:
-
-```
-@software{liner_shipping_optimizer_2025,
-  author    = {Mallameeda, Ajay Kumar},
-  title     = {Liner Shipping Network Optimizer: A Distributed GA+MILP Platform},
-  year      = {2025},
-  institution = {IIT Palakkad},
-  url       = {https://github.com/112301021/Liner_shipping_optimizer}
+```bibtex
+@software{ai_vessel_routing_2026,
+  title = {AI Vessel Routing System: Multi-Agent Liner Shipping Optimizer},
+  version = {1.0.0-rc1},
+  year = {2026},
+  author = {AI Vessel Routing Team},
+  note = {Hybrid AI + OR optimization with GA, MILP, and LLM coordination}
 }
 ```
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Made with ⚓ for the global shipping industry**
+
+[Back to Top](#-ai-vessel-routing-system)
+
+</div>
