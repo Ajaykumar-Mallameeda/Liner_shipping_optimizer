@@ -134,3 +134,32 @@ pytestdebug.log
 # Free Claude Code (any location)
 /free-claude-code/
 **/free-claude-code/
+
+# ==========================
+# Frontend Build
+# ==========================
+
+frontend/dist/
+frontend/node_modules/
+
+# Generated runtime outputs
+frontend/evaluation_output.json
+
+# Generated demo outputs
+outputs/*.json
+outputs/*.csv
+
+# Runtime caches
+frontend/.vite/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+ehthumbs.db
+
+# Misc
+*.tmp
+*.bak
+*.swp

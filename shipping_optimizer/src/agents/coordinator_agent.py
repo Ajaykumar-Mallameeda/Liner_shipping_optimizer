@@ -75,7 +75,7 @@ class CoordinatorAgent(BaseAgent):
 
         # 5. Structured LLM decisions
         decisions = self._generate_decisions(
-            conflicts, regional_solutions, global_metrics, evaluation
+            conflicts, regional_solutions, global_metrics, evaluation, iteration
         )
 
         # 6. Machine-usable feedback gradients
@@ -332,6 +332,7 @@ class CoordinatorAgent(BaseAgent):
         regional_solutions:  List[Dict],
         metrics:             Dict,
         evaluation:          Dict,
+        iteration:           int = 0,
     ) -> Dict:
         """
         Returns a structured dict with 'actions' and 'priorities'.

@@ -1,8 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import MaritimeDashboard from './MaritimeDashboard.jsx';
+import MaritimeDashboard from './views/MaritimeDashboard.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import './index.css';
+import './styles/index.css';
 
 console.log('Loading maritime dashboard...');
 
