@@ -62,6 +62,13 @@ test_output.txt
 server.log
 pipeline.log
 debug.log
+_legacy/
+*.html
+*.pdf
+*.db
+analysis_output/
+logs/
+raw_responses/
 
 # ---------------------------------------------------------
 # Local Data / Generated Datasets

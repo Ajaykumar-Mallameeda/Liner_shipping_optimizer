@@ -10,8 +10,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-success)](https://github.com)
-[![Assertions](https://img.shields.io/badge/assertions-309%2F313-98.7%25-success)](V1_BACKEND_FREEZE_CERTIFICATION.md)
-[![AI](https://img.shields.io/badge/AI-100%25_Coordinator-violet)](AI_INFLUENCE_VERIFICATION_REPORT.md)
+[![Assertions](https://img.shields.io/badge/assertions-309%2F313-98.7%25-success)](Analysis/V1_BACKEND_FREEZE_CERTIFICATION.md)
+[![AI](https://img.shields.io/badge/AI-100%25_Coordinator-violet)](Analysis/AI_INFLUENCE_VERIFICATION_REPORT.md)
 [![Contributing](https://img.shields.io/badge/contributing-guide-orange)](CONTRIBUTING.md)
 [![Citation](https://img.shields.io/badge/citation-cff-blue)](CITATION.cff)
 
@@ -76,7 +76,7 @@ The operations dashboard provides **14 interactive tabs** covering fleet managem
 
 <div align="center">
   <img src="assets/architecture/system-architecture.svg" alt="System Architecture" width="95%"/>
-  <p><em>Complete system architecture — from data sources to production dashboard. <a href="assets/architecture/system-architecture.png">Download PNG</a> · <a href="assets/architecture/system-architecture.svg">Download SVG</a></em></p>
+  <p><em>Complete system architecture — from data sources to production dashboard. <a href="assets/architecture/system-architecture.svg">Download SVG</a> (open in browser for full resolution)</em></p>
 </div>
 
 ```
@@ -448,18 +448,18 @@ Production:  http://localhost:3000
 
 | Document | Description |
 |---|---|
-| [V1 Release Validation](V1_RELEASE_VALIDATION_REPORT.md) | Comprehensive release readiness assessment |
-| [Backend Freeze Certification](V1_BACKEND_FREEZE_CERTIFICATION.md) | Algorithm certification and freeze verification |
-| [Algorithm Certification](ALGORITHM_AND_PROMPT_CORRECTNESS_CERTIFICATION.md) | Algorithmic correctness proofs |
-| [Prompt Freeze Report](BACKEND_PROMPT_REFINEMENT_AND_FREEZE_REPORT.md) | LLM prompt engineering and freeze |
-| [Architecture Consolidation](FRONTEND_ARCHITECTURE_CONSOLIDATION_REPORT.md) | Frontend architecture evolution |
-| [Component Modularization](FRONTEND_COMPONENT_MODULARIZATION_REPORT.md) | Component extraction and clean-up |
-| [Production Intelligence](FRONTEND_PRODUCTION_INTELLIGENCE_REPORT.md) | Intelligence panel implementation |
-| [Executive Operations](FRONTEND_EXECUTIVE_OPERATIONS_COMPLETION_REPORT.md) | Final feature completion report |
-| [Runtime Synchronization](FRONTEND_RUNTIME_TRUTH_SYNCHRONIZATION_REPORT.md) | Runtime truth alignment |
-| [Runtime Integration Plan](FRONTEND_RUNTIME_INTEGRATION_MASTER_PLAN.md) | Master implementation plan |
-| [Product Readiness Audit](V1_PRODUCT_READINESS_AND_FRONTEND_MASTER_AUDIT.md) | Pre-release comprehensive audit |
-| [System Truth Report](SYSTEM_TRUTH_REPORT.md) | System-level truth verification |
+| [V1 Release Validation](Analysis/V1_RELEASE_VALIDATION_REPORT.md) | Comprehensive release readiness assessment |
+| [Backend Freeze Certification](Analysis/V1_BACKEND_FREEZE_CERTIFICATION.md) | Algorithm certification and freeze verification |
+| [Algorithm Certification](Analysis/ALGORITHM_AND_PROMPT_CORRECTNESS_CERTIFICATION.md) | Algorithmic correctness proofs |
+| [Prompt Freeze Report](Analysis/BACKEND_PROMPT_REFINEMENT_AND_FREEZE_REPORT.md) | LLM prompt engineering and freeze |
+| [Architecture Consolidation](Analysis/FRONTEND_ARCHITECTURE_CONSOLIDATION_REPORT.md) | Frontend architecture evolution |
+| [Component Modularization](Analysis/FRONTEND_COMPONENT_MODULARIZATION_REPORT.md) | Component extraction and clean-up |
+| [Production Intelligence](Analysis/FRONTEND_PRODUCTION_INTELLIGENCE_REPORT.md) | Intelligence panel implementation |
+| [Executive Operations](Analysis/FRONTEND_EXECUTIVE_OPERATIONS_COMPLETION_REPORT.md) | Final feature completion report |
+| [Runtime Synchronization](Analysis/FRONTEND_RUNTIME_TRUTH_SYNCHRONIZATION_REPORT.md) | Runtime truth alignment |
+| [Runtime Integration Plan](Analysis/FRONTEND_RUNTIME_INTEGRATION_MASTER_PLAN.md) | Master implementation plan |
+| [Product Readiness Audit](Analysis/V1_PRODUCT_READINESS_AND_FRONTEND_MASTER_AUDIT.md) | Pre-release comprehensive audit |
+| [System Truth Report](Analysis/SYSTEM_TRUTH_REPORT.md) | System-level truth verification |
 | [Architecture](docs/ARCHITECTURE.md) | System architecture documentation |
 | [Release Notes](docs/RELEASE_NOTES.md) | V1.0.0-rc1 release notes |
 | [Screenshot Guide](docs/IMAGE_GUIDE.md) | Image placement and naming guide |
