@@ -189,6 +189,8 @@ Demand Matrix (9,622 OD lanes)     Fleet Database (6 vessel classes)
 </div>
 
 ### Agent Interaction
+
+```
                     ┌──────────────────────────────────┐
                     │    Coordinator Agent (LLM)        │
                     │  ┌────────────────────────────┐  │
