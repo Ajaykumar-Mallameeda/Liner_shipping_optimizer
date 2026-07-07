@@ -29,14 +29,14 @@
 
 **Solution:** The AI Vessel Routing System combines **hierarchical genetic algorithms (GA)**, **mixed-integer linear programming (MILP)**, and **multi-agent LLM coordination** to produce optimized weekly service networks with profit-maximizing route assignments, fleet deployment, and frequency scheduling.
 
-**Result:** A production-grade system that generates **$901.7M/week** in optimized profit across **511 services** deployed in **5 global regions**, with **52.5% demand coverage** and **3-iteration convergence**.
+**Result:** A production-grade system that generates on average of **$450.7M/week** in optimized profit across **~400+ services** deployed in **5 global regions**, with **+-52% demand coverage** and **3-iteration convergence**.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │          AI VESSEL ROUTING OPTIMIZER — SYSTEM OVERVIEW       │
 ├───────────────┬───────────────┬───────────────┬──────────────┤
-│   435 Ports   │  9,622 Lanes  │  511 Services  │ $901.7M/wk  │
-│  5 Regions    │  5 Vessel cls │  3 Iterations  │ 98.7% Score │
+│   435 Ports   │  9,622 Lanes  │  400+ Services│ on avg$450.7M/wk│
+│  5 Regions    │  5 Vessel cls │  3 Iterations │ 98.7% Score │
 └───────────────┴───────────────┴───────────────┴──────────────┘
 ```
 
@@ -237,14 +237,14 @@ Demand Matrix (9,622 OD lanes)     Fleet Database (6 vessel classes)
 |---|---|
 | **Ports in Network** | 435 |
 | **Origin-Destination Lanes** | 9,622 |
-| **Services Deployed** | 511 |
+| **Services Deployed** | 400+ |
 | **Vessel Classes** | 5 (Feeder 450/800, Panamax, Post-Panamax, Super-Panamax) |
 | **Total Fleet Capacity** | 1,655,500 TEU/wk |
 | **Fleet Utilization** | 97.7% |
 | **Demand Coverage** | 52.5% |
-| **Weekly Profit** | **$901,690,372** |
-| **Annual Profit (52wk)** | **$46.9 billion** |
-| **Profit Margin** | 81.2% |
+| **Weekly Profit** | **$450.7 million on avg** |
+| **Annual Profit (52wk)** | **~$30 billion** |
+| **Profit Margin** | 20-35% |
 | **Revenue** | $2.84 billion/wk |
 
 ### Runtime & Quality
