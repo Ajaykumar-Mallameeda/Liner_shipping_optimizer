@@ -36,8 +36,8 @@ The complete project code, dashboard, documentation, and runtime outputs are loc
 | Metric | Value |
 |---|---|
 | **Services Deployed** | 511 across 5 regions |
-| **Weekly Profit** | **$901.7M** |
-| **Coverage** | 52.5% demand coverage |
+| **Weekly Profit** | **~$435.7M** |
+| **Coverage** | ~52.5% demand coverage |
 | **Fleet Utilization** | 97.7% |
 | **Assertions** | 309/313 (98.7%) |
 | **AI Integration** | 100% AI-generated coordinator decisions |
